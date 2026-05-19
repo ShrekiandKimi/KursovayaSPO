@@ -1,190 +1,116 @@
-import { useState, useEffect, useCallback } from 'react';
-import { supabase } from '../../lib/supabase';
-import { BarChart3, TrendingUp, Users, MapPin } from 'lucide-react';
-
-interface TripData {
-  id: string;
-  driver_id: string;
-  fare: number;
-  driver_earnings: number;
-  park_earnings: number;
-  distance_km: number;
-  duration_min: number;
-  started_at: string;
-  status: string;
-}
+import { useState, useMemo } from 'react';
+import { useData } from '../../contexts/DataContext';
+import { BarChart3, TrendingUp, Users, AlertTriangle, DollarSign, Calendar } from 'lucide-react';
 
 export default function ModStatistics() {
-  const [trips, setTrips] = useState<TripData[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [period, setPeriod] = useState<'week' | 'month' | 'year'>('month');
+  const { logs, drivers } = useData();
+  const [period, setPeriod] = useState<'week' | 'month' | 'all'>('month');
+  const [selectedDriver, setSelectedDriver] = useState<string>('all');
 
-  const fetchTrips = useCallback(async () => {
-    setLoading(true);
+  // Фильтрация по периоду и водителю
+  const filtered = useMemo(() => {
     const now = new Date();
-    let startDate: Date;
-    if (period === 'week') {
-      startDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-    } else if (period === 'month') {
-      startDate = new Date(now.getFullYear(), now.getMonth(), 1);
-    } else {
-      startDate = new Date(now.getFullYear(), 0, 1);
-    }
+    let startDate = new Date(0);
+    if (period === 'week') startDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+    else if (period === 'month') startDate = new Date(now.getFullYear(), now.getMonth(), 1);
+    
+    return logs.filter(l => {
+      const logDate = new Date(l.date + 'T00:00:00');
+      const inPeriod = logDate >= startDate;
+      const inDriver = selectedDriver === 'all' || l.driver_id === selectedDriver;
+      return inPeriod && inDriver;
+    }).sort((a, b) => b.date.localeCompare(a.date));
+  }, [logs, period, selectedDriver]);
 
-    const { data } = await supabase
-      .from('trips')
-      .select('*')
-      .gte('started_at', startDate.toISOString())
-      .order('started_at', { ascending: false });
-    setTrips(data || []);
-    setLoading(false);
-  }, [period]);
+  // Агрегация
+  const stats = useMemo(() => {
+    const totalRevenue = filtered.reduce((s, l) => s + l.total_revenue, 0);
+    const totalTrips = filtered.reduce((s, l) => s + l.trips_count, 0);
+    const accidents = filtered.filter(l => l.had_accident).length;
+    const workDays = new Set(filtered.map(l => l.driver_id + '_' + l.date)).size;
+    const avgPerDay = workDays > 0 ? totalRevenue / workDays : 0;
+    const avgPerTrip = totalTrips > 0 ? totalRevenue / totalTrips : 0;
+    return { totalRevenue, totalTrips, accidents, workDays, avgPerDay, avgPerTrip };
+  }, [filtered]);
 
-  useEffect(() => {
-    fetchTrips();
-  }, [fetchTrips]);
-
-  const totalFare = trips.reduce((s, t) => s + Number(t.fare), 0);
-  const totalParkEarnings = trips.reduce((s, t) => s + Number(t.park_earnings), 0);
-  const totalDriverEarnings = trips.reduce((s, t) => s + Number(t.driver_earnings), 0);
-  const totalDistance = trips.reduce((s, t) => s + Number(t.distance_km), 0);
-  const completedTrips = trips.filter(t => t.status === 'completed').length;
-  const cancelledTrips = trips.filter(t => t.status === 'cancelled').length;
-  const uniqueDrivers = new Set(trips.map(t => t.driver_id)).size;
-  const avgFare = completedTrips > 0 ? totalFare / completedTrips : 0;
-
-  // Group by day
-  const dailyData: Record<string, { fare: number; trips: number }> = {};
-  trips.forEach((t) => {
-    const day = new Date(t.started_at).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' });
-    if (!dailyData[day]) dailyData[day] = { fare: 0, trips: 0 };
-    dailyData[day].fare += Number(t.fare);
-    dailyData[day].trips += 1;
-  });
-
-  const maxDailyFare = Math.max(...Object.values(dailyData).map(d => d.fare), 1);
-
-  if (loading) {
-    return <div className="text-center py-12 text-gray-400">Загрузка...</div>;
-  }
+  const driverNames = useMemo(() => {
+    const map = new Map<string, string>();
+    drivers.forEach(d => map.set(d.id, d.full_name));
+    return map;
+  }, [drivers]);
 
   return (
     <div className="space-y-6">
-      {/* Period selector */}
-      <div className="flex gap-2">
-        {(['week', 'month', 'year'] as const).map((p) => (
-          <button
-            key={p}
-            onClick={() => setPeriod(p)}
-            className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-colors ${
-              period === p ? 'bg-sky-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-            }`}
-          >
-            {p === 'week' ? 'Неделя' : p === 'month' ? 'Месяц' : 'Год'}
-          </button>
-        ))}
+      {/* Фильтры */}
+      <div className="flex flex-wrap gap-3">
+        <div className="flex bg-gray-100 rounded-lg p-1">
+          {(['week', 'month', 'all'] as const).map(p => (
+            <button key={p} onClick={() => setPeriod(p)} className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${period === p ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
+              {p === 'week' ? 'Неделя' : p === 'month' ? 'Месяц' : 'Всё время'}
+            </button>
+          ))}
+        </div>
+        <select value={selectedDriver} onChange={e => setSelectedDriver(e.target.value)} className="px-3 py-1.5 border border-gray-300 rounded-lg text-sm text-gray-700 focus:ring-2 focus:ring-sky-500 outline-none">
+          <option value="all">Все водители</option>
+          {drivers.filter(d => d.role === 'driver').map(d => <option key={d.id} value={d.id}>{d.full_name}</option>)}
+        </select>
       </div>
 
-      {/* Stats */}
+      {/* Карточки статистики */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="bg-white rounded-xl border border-gray-200 p-5">
-          <div className="flex items-center gap-2 text-gray-500 text-sm mb-2">
-            <TrendingUp className="w-4 h-4" /> Выручка
-          </div>
-          <div className="text-2xl font-bold text-gray-900">{totalFare.toLocaleString('ru-RU')} ₽</div>
-        </div>
-        <div className="bg-white rounded-xl border border-gray-200 p-5">
-          <div className="flex items-center gap-2 text-gray-500 text-sm mb-2">
-            <BarChart3 className="w-4 h-4" /> Поездки
-          </div>
-          <div className="text-2xl font-bold text-gray-900">{completedTrips}</div>
-          <div className="text-xs text-red-500 mt-0.5">{cancelledTrips} отмен</div>
-        </div>
-        <div className="bg-white rounded-xl border border-gray-200 p-5">
-          <div className="flex items-center gap-2 text-gray-500 text-sm mb-2">
-            <Users className="w-4 h-4" /> Водителей
-          </div>
-          <div className="text-2xl font-bold text-gray-900">{uniqueDrivers}</div>
-        </div>
-        <div className="bg-white rounded-xl border border-gray-200 p-5">
-          <div className="flex items-center gap-2 text-gray-500 text-sm mb-2">
-            <MapPin className="w-4 h-4" /> Средний чек
-          </div>
-          <div className="text-2xl font-bold text-gray-900">{avgFare.toFixed(0)} ₽</div>
-        </div>
+        <StatCard icon={DollarSign} label="Общая выручка" value={`${stats.totalRevenue.toLocaleString('ru-RU')} ₽`} color="text-sky-600" />
+        <StatCard icon={BarChart3} label="Всего поездок" value={stats.totalTrips.toLocaleString('ru-RU')} color="text-gray-900" />
+        <StatCard icon={Calendar} label="Отработано смен" value={stats.workDays} color="text-green-600" />
+        <StatCard icon={AlertTriangle} label="Зафиксировано ДТП" value={stats.accidents} color={stats.accidents > 0 ? 'text-red-600' : 'text-gray-400'} />
       </div>
 
-      {/* Revenue breakdown */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div className="bg-white rounded-xl border border-gray-200 p-5">
-          <div className="text-xs text-gray-500 mb-1">Доход парка</div>
-          <div className="text-xl font-bold text-sky-600">{totalParkEarnings.toLocaleString('ru-RU')} ₽</div>
-          <div className="mt-2 h-2 bg-gray-100 rounded-full overflow-hidden">
-            <div
-              className="h-full bg-sky-500 rounded-full"
-              style={{ width: `${totalFare > 0 ? (totalParkEarnings / totalFare) * 100 : 0}%` }}
-            />
-          </div>
-        </div>
-        <div className="bg-white rounded-xl border border-gray-200 p-5">
-          <div className="text-xs text-gray-500 mb-1">Заработок водителей</div>
-          <div className="text-xl font-bold text-green-600">{totalDriverEarnings.toLocaleString('ru-RU')} ₽</div>
-          <div className="mt-2 h-2 bg-gray-100 rounded-full overflow-hidden">
-            <div
-              className="h-full bg-green-500 rounded-full"
-              style={{ width: `${totalFare > 0 ? (totalDriverEarnings / totalFare) * 100 : 0}%` }}
-            />
-          </div>
-        </div>
-        <div className="bg-white rounded-xl border border-gray-200 p-5">
-          <div className="text-xs text-gray-500 mb-1">Общий пробег</div>
-          <div className="text-xl font-bold text-gray-900">{totalDistance.toFixed(0)} км</div>
-        </div>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <StatCard icon={TrendingUp} label="Средняя выручка за смену" value={`${stats.avgPerDay.toFixed(0)} ₽`} color="text-amber-600" />
+        <StatCard icon={DollarSign} label="Средний чек" value={`${stats.avgPerTrip.toFixed(0)} ₽`} color="text-emerald-600" />
       </div>
 
-      {/* Daily chart */}
-      {Object.keys(dailyData).length > 0 && (
-        <div className="bg-white rounded-xl border border-gray-200 p-6">
-          <h3 className="text-sm font-semibold text-gray-900 mb-4">Выручка по дням</h3>
-          <div className="flex items-end gap-1.5 h-48">
-            {Object.entries(dailyData).map(([day, data]) => (
-              <div key={day} className="flex-1 flex flex-col items-center gap-1">
-                <div className="text-[10px] text-gray-500">{data.fare.toFixed(0)}</div>
-                <div
-                  className="w-full bg-sky-500 rounded-t-sm min-h-[4px] transition-all hover:bg-sky-400"
-                  style={{ height: `${(data.fare / maxDailyFare) * 100}%` }}
-                />
-                <div className="text-[10px] text-gray-400">{day}</div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
+      {/* Таблица смен */}
+      <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+        <h3 className="text-sm font-semibold text-gray-900 px-6 py-4 border-b border-gray-100">Детализация по сменам</h3>
+        {filtered.length === 0 ? <p className="text-gray-400 text-sm py-12 text-center">Нет данных за выбранный период</p> : (
+          <table className="w-full text-sm text-left">
+            <thead className="bg-gray-50 text-gray-500">
+              <tr>
+                <th className="px-4 py-3">Водитель</th>
+                <th className="px-4 py-3">Дата</th>
+                <th className="px-4 py-3">Смена</th>
+                <th className="px-4 py-3">Поездки</th>
+                <th className="px-4 py-3">Выручка</th>
+                <th className="px-4 py-3">Статус</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              {filtered.map(log => (
+                <tr key={log.id} className="hover:bg-gray-50">
+                  <td className="px-4 py-3 font-medium">{driverNames.get(log.driver_id) || 'Неизвестно'}</td>
+                  <td className="px-4 py-3">{new Date(log.date + 'T00:00:00').toLocaleDateString('ru-RU')}</td>
+                  <td className="px-4 py-3 text-gray-600">{log.start_time} — {log.end_time}</td>
+                  <td className="px-4 py-3">{log.trips_count}</td>
+                  <td className="px-4 py-3 font-semibold">{log.total_revenue.toLocaleString('ru-RU')} ₽</td>
+                  <td className="px-4 py-3">{log.had_accident ? <span className="text-xs text-red-600 font-medium">ДТП</span> : <span className="text-xs text-green-600">Ок</span>}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+    </div>
+  );
+}
 
-      {/* Trips per day */}
-      {Object.keys(dailyData).length > 0 && (
-        <div className="bg-white rounded-xl border border-gray-200 p-6">
-          <h3 className="text-sm font-semibold text-gray-900 mb-4">Поездки по дням</h3>
-          <div className="space-y-2">
-            {Object.entries(dailyData).map(([day, data]) => {
-              const maxTrips = Math.max(...Object.values(dailyData).map(d => d.trips), 1);
-              return (
-                <div key={day} className="flex items-center gap-3">
-                  <div className="text-xs text-gray-500 w-12">{day}</div>
-                  <div className="flex-1 h-6 bg-gray-100 rounded-full overflow-hidden">
-                    <div
-                      className="h-full bg-sky-500 rounded-full flex items-center justify-end pr-2"
-                      style={{ width: `${(data.trips / maxTrips) * 100}%`, minWidth: '24px' }}
-                    >
-                      <span className="text-[10px] font-medium text-white">{data.trips}</span>
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
+function StatCard({ icon: Icon, label, value, color }: { icon: any, label: string, value: string | number, color: string }) {
+  return (
+    <div className="bg-white rounded-xl border border-gray-200 p-5 flex items-start justify-between">
+      <div>
+        <div className="text-xs text-gray-500 mb-1">{label}</div>
+        <div className={`text-2xl font-bold ${color}`}>{value}</div>
+      </div>
+      <div className="w-10 h-10 bg-gray-50 rounded-lg flex items-center justify-center"><Icon className="w-5 h-5 text-gray-400" /></div>
     </div>
   );
 }

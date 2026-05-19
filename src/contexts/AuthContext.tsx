@@ -21,11 +21,12 @@ interface AuthContextType {
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
+const USERS_KEY = 'taxopark_users';
+const SESSION_KEY = 'taxopark_session';
 
-// Генератор UUID для локальной разработки
 function generateId() {
-  return typeof crypto !== 'undefined' && crypto.randomUUID 
-    ? crypto.randomUUID() 
+  return typeof crypto !== 'undefined' && crypto.randomUUID
+    ? crypto.randomUUID()
     : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
         const r = Math.random() * 16 | 0;
         return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16);
@@ -39,54 +40,60 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     try {
-      const stored = localStorage.getItem('taxopark_session');
-      if (stored) {
-        const { user: u, profile: p } = JSON.parse(stored);
-        setUser(u);
-        setProfile(p);
+      const session = localStorage.getItem(SESSION_KEY);
+      if (session) {
+        const parsed = JSON.parse(session);
+        setUser(parsed.user);
+        setProfile(parsed.profile);
       }
-    } catch (e) {
-      console.error('Failed to load local auth', e);
-    } finally {
-      setLoading(false);
-    }
+    } catch (e) { console.error('Session load error', e); }
+    finally { setLoading(false); }
   }, []);
 
   async function signUp(email: string, password: string, fullName: string, phone: string, role: 'moderator' | 'driver') {
-    await new Promise(r => setTimeout(r, 600)); // Имитация сети
+    await new Promise(r => setTimeout(r, 400)); // Имитация сети
+    const users = JSON.parse(localStorage.getItem(USERS_KEY) || '{}');
+    if (users[email]) throw new Error('Email уже зарегистрирован');
+
     const id = generateId();
-    const newProfile: Profile = {
-      id, email, full_name: fullName, phone, role,
-      avatar_url: null, is_active: true, created_at: new Date().toISOString()
-    };
+    users[email] = { password, id, full_name: fullName, phone, role };
+    localStorage.setItem(USERS_KEY, JSON.stringify(users));
 
-    // Сохраняем в локальную "БД"
-    const usersDb = JSON.parse(localStorage.getItem('taxopark_users_db') || '{}');
-    usersDb[email] = { password, profile: newProfile };
-    localStorage.setItem('taxopark_users_db', JSON.stringify(usersDb));
+    const newProfile: Profile = { id, email, full_name: fullName, phone, role, avatar_url: null, is_active: true, created_at: new Date().toISOString() };
 
-    // Автоматический вход после регистрации
-    setUser({ id, email });
+    // Добавляем в список водителей для модератора
+    const drivers = JSON.parse(localStorage.getItem('taxopark_drivers') || '[]');
+    drivers.unshift({ ...newProfile, assigned_car_id: null });
+    localStorage.setItem('taxopark_drivers', JSON.stringify(drivers));
+
+    // Сохраняем сессию
+    const sessionData = { user: { id, email }, profile: newProfile };
+    localStorage.setItem(SESSION_KEY, JSON.stringify(sessionData));
+    setUser(sessionData.user);
     setProfile(newProfile);
-    localStorage.setItem('taxopark_session', JSON.stringify({ user: { id, email }, profile: newProfile }));
+    window.dispatchEvent(new Event('storage')); // Обновить остальные вкладки
   }
 
   async function signIn(email: string, password: string) {
-    await new Promise(r => setTimeout(r, 400));
-    const usersDb = JSON.parse(localStorage.getItem('taxopark_users_db') || '{}');
-    const record = usersDb[email];
-    if (!record || record.password !== password) {
-      throw new Error('Неверный email или пароль');
-    }
-    setUser({ id: record.profile.id, email });
-    setProfile(record.profile);
-    localStorage.setItem('taxopark_session', JSON.stringify({ user: { id: record.profile.id, email }, profile: record.profile }));
+    await new Promise(r => setTimeout(r, 300));
+    const users = JSON.parse(localStorage.getItem(USERS_KEY) || '{}');
+    const record = users[email];
+    if (!record || record.password !== password) throw new Error('Неверный email или пароль');
+
+    const drivers = JSON.parse(localStorage.getItem('taxopark_drivers') || '[]');
+    const foundProfile = drivers.find((d: any) => d.id === record.id) || null;
+
+    const sessionData = { user: { id: record.id, email }, profile: foundProfile };
+    localStorage.setItem(SESSION_KEY, JSON.stringify(sessionData));
+    setUser(sessionData.user);
+    setProfile(sessionData.profile);
+    window.dispatchEvent(new Event('storage'));
   }
 
   function signOut() {
     setUser(null);
     setProfile(null);
-    localStorage.removeItem('taxopark_session');
+    localStorage.removeItem(SESSION_KEY);
   }
 
   return (
