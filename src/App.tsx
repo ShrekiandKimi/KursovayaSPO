@@ -14,23 +14,12 @@ function AppContent() {
   const [page, setPage] = useState<Page>('landing');
 
   useEffect(() => {
-    if (loading) return;
-    if (user && profile) {
-      setPage(profile.role === 'moderator' ? 'moderator' : 'driver');
-    } else {
-      setPage('landing');
-    }
+    if (!loading && user && profile) setPage(profile.role === 'moderator' ? 'moderator' : 'driver');
+    else if (!loading && !user) setPage('landing');
   }, [user, profile, loading]);
 
   const navigate = (p: string) => setPage(p as Page);
-
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center text-gray-400">
-        Загрузка...
-      </div>
-    );
-  }
+  if (loading) return <div className="min-h-screen bg-gray-50 flex items-center justify-center text-gray-400">Загрузка...</div>;
 
   switch (page) {
     case 'landing': return <LandingPage onNavigate={navigate} />;
@@ -43,11 +32,5 @@ function AppContent() {
 }
 
 export default function App() {
-  return (
-    <DataProvider>
-      <AuthProvider>
-        <AppContent />
-      </AuthProvider>
-    </DataProvider>
-  );
+  return <DataProvider><AuthProvider><AppContent /></AuthProvider></DataProvider>;
 }

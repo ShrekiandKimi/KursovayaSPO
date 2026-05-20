@@ -1,6 +1,6 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useMemo } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
-import { supabase } from '../../lib/supabase';
+import { useData } from '../../contexts/DataContext';
 import {
   Car, DollarSign, Calendar, Star, AlertTriangle, Clock,
   LogOut, Menu, X, Bell
@@ -15,31 +15,44 @@ type Tab = 'income' | 'schedule' | 'rating' | 'car' | 'calendar';
 
 export default function DriverDashboard({ onNavigate }: { onNavigate: (page: string) => void }) {
   const { profile, signOut } = useAuth();
+  const { logs, cars } = useData();
   const [activeTab, setActiveTab] = useState<Tab>('income');
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [upcomingInspections, setUpcomingInspections] = useState<{ type: string; next_date: string }[]>([]);
 
-  const fetchInspections = useCallback(async () => {
-    if (!profile) return;
-    const { data } = await supabase
-      .from('inspections')
-      .select('type, next_date')
-      .eq('driver_id', profile.id)
-      .eq('completed', false)
-      .order('next_date', { ascending: true });
-    setUpcomingInspections(data || []);
-  }, [profile]);
+  // Находим назначенный автомобиль водителя
+  const assignedCar = useMemo(() => {
+    if (!profile) return null;
+    return cars.find(c => c.assigned_driver_id === profile.id) || null;
+  }, [profile, cars]);
 
-  useEffect(() => {
-    fetchInspections();
-  }, [fetchInspections]);
+  // Считаем предстоящие события из локальных данных (страховка, ТО)
+  const upcomingReminders = useMemo(() => {
+    if (!assignedCar) return [];
+    const reminders = [];
+    const now = new Date();
+    const threshold = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
+
+    if (assignedCar.insurance_expiry) {
+      const exp = new Date(assignedCar.insurance_expiry);
+      if (exp >= now && exp <= threshold) {
+        reminders.push({ type: 'Страховка', date: assignedCar.insurance_expiry });
+      }
+    }
+    if (assignedCar.tech_inspection_expiry) {
+      const exp = new Date(assignedCar.tech_inspection_expiry);
+      if (exp >= now && exp <= threshold) {
+        reminders.push({ type: 'Техосмотр', date: assignedCar.tech_inspection_expiry });
+      }
+    }
+    return reminders;
+  }, [assignedCar]);
 
   const tabs: { id: Tab; label: string; icon: React.ElementType }[] = [
-    { id: 'income', label: 'Доходы и поездки', icon: DollarSign },
-    { id: 'schedule', label: 'График работы', icon: Clock },
-    { id: 'rating', label: 'Рейтинг и штрафы', icon: Star },
-    { id: 'car', label: 'Статус авто', icon: Car },
-    { id: 'calendar', label: 'Календарь ТО', icon: Calendar },
+    { id: 'income', label: 'Доходы', icon: DollarSign },
+    { id: 'schedule', label: 'График', icon: Clock },
+    { id: 'rating', label: 'Рейтинг', icon: Star },
+    { id: 'car', label: 'Авто', icon: Car },
+    { id: 'calendar', label: 'Календарь', icon: Calendar },
   ];
 
   async function handleSignOut() {
@@ -47,9 +60,10 @@ export default function DriverDashboard({ onNavigate }: { onNavigate: (page: str
     onNavigate('landing');
   }
 
+  if (!profile) return null;
+
   return (
     <div className="min-h-screen bg-gray-50 flex">
-      {/* Mobile overlay */}
       {sidebarOpen && (
         <div className="fixed inset-0 bg-black/30 z-40 lg:hidden" onClick={() => setSidebarOpen(false)} />
       )}
@@ -70,21 +84,21 @@ export default function DriverDashboard({ onNavigate }: { onNavigate: (page: str
 
         <div className="p-4">
           <div className="bg-sky-50 rounded-xl p-4 mb-6">
-            <div className="font-semibold text-gray-900 text-sm">{profile?.full_name}</div>
-            <div className="text-xs text-gray-500 mt-0.5">{profile?.phone}</div>
+            <div className="font-semibold text-gray-900 text-sm">{profile.full_name}</div>
+            <div className="text-xs text-gray-500 mt-0.5">{profile.phone}</div>
             <div className="inline-flex items-center gap-1 mt-2 text-xs font-medium text-sky-700 bg-sky-100 px-2 py-0.5 rounded-full">
               <Car className="w-3 h-3" /> Водитель
             </div>
           </div>
 
-          {upcomingInspections.length > 0 && (
+          {upcomingReminders.length > 0 && (
             <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 mb-4">
               <div className="flex items-center gap-1.5 text-amber-700 text-xs font-medium mb-1">
                 <Bell className="w-3.5 h-3.5" /> Напоминания
               </div>
-              {upcomingInspections.slice(0, 2).map((insp, i) => (
+              {upcomingReminders.slice(0, 2).map((rem, i) => (
                 <div key={i} className="text-xs text-amber-600 mt-1">
-                  {insp.type === 'tech_inspection' ? 'ТО' : 'Медосмотр'} — {insp.next_date}
+                  {rem.type} — {new Date(rem.date).toLocaleDateString('ru-RU')}
                 </div>
               ))}
             </div>
@@ -128,14 +142,15 @@ export default function DriverDashboard({ onNavigate }: { onNavigate: (page: str
             {tabs.find(t => t.id === activeTab)?.label}
           </h1>
           <div className="flex items-center gap-2">
-            {upcomingInspections.length > 0 && (
+            {upcomingReminders.length > 0 && (
               <button
                 onClick={() => setActiveTab('calendar')}
                 className="relative p-2 text-amber-600 hover:bg-amber-50 rounded-lg transition-colors"
+                title="Предстоящие события"
               >
                 <AlertTriangle className="w-5 h-5" />
                 <span className="absolute -top-0.5 -right-0.5 w-4 h-4 bg-amber-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center">
-                  {upcomingInspections.length}
+                  {upcomingReminders.length}
                 </span>
               </button>
             )}

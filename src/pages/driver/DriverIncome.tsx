@@ -1,221 +1,49 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useMemo } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
-import { supabase } from '../../lib/supabase';
-import { TrendingUp, MapPin, Clock, DollarSign } from 'lucide-react';
-
-interface Trip {
-  id: string;
-  pickup_address: string;
-  dropoff_address: string;
-  fare: number;
-  driver_earnings: number;
-  distance_km: number;
-  duration_min: number;
-  started_at: string;
-  ended_at: string;
-  status: string;
-}
-
-interface Payment {
-  id: string;
-  amount: number;
-  status: string;
-  period_start: string;
-  period_end: string;
-  paid_at: string | null;
-}
+import { useData } from '../../contexts/DataContext';
+import { TrendingUp, Clock, DollarSign, MapPin, Calendar } from 'lucide-react';
 
 export default function DriverIncome() {
   const { profile } = useAuth();
-  const [trips, setTrips] = useState<Trip[]>([]);
-  const [payments, setPayments] = useState<Payment[]>([]);
+  const { logs } = useData();
   const [period, setPeriod] = useState<'week' | 'month' | 'all'>('month');
-  const [loading, setLoading] = useState(true);
 
-  const fetchData = useCallback(async () => {
-    if (!profile) return;
-    setLoading(true);
+  const myLogs = useMemo(() => {
+    if (!profile) return [];
+    const now = new Date(); let startDate: Date | null = null;
+    if (period === 'week') startDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+    else if (period === 'month') startDate = new Date(now.getFullYear(), now.getMonth(), 1);
+    return logs.filter(l => { if (l.driver_id !== profile.id) return false; if (startDate) return new Date(l.date + 'T00:00:00') >= startDate; return true; }).sort((a, b) => b.date.localeCompare(a.date));
+  }, [profile, logs, period]);
 
-    let startDate: Date | undefined;
-    const now = new Date();
-    if (period === 'week') {
-      startDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-    } else if (period === 'month') {
-      startDate = new Date(now.getFullYear(), now.getMonth(), 1);
-    }
+  const stats = useMemo(() => {
+    const totalEarnings = myLogs.reduce((s, l) => s + (l.revenue || 0), 0);
+    const totalTrips = myLogs.reduce((s, l) => s + (l.trips_count || 0), 0);
+    const totalHours = myLogs.reduce((s, l) => { const st = new Date(`2000-01-01T${l.start_time || '00:00'}`); const en = new Date(`2000-01-01T${l.end_time || '23:59'}`); return s + (en.getTime() - st.getTime()) / 3600000; }, 0);
+    return { totalEarnings, totalTrips, totalHours, avgPerTrip: totalTrips ? totalEarnings / totalTrips : 0 };
+  }, [myLogs]);
 
-    let query = supabase
-      .from('trips')
-      .select('*')
-      .eq('driver_id', profile.id)
-      .order('started_at', { ascending: false });
+  const dailyData = useMemo(() => {
+    const map: Record<string, number> = {};
+    myLogs.forEach(l => { const day = new Date(l.date + 'T00:00:00').toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' }); map[day] = (map[day] || 0) + (l.revenue || 0); });
+    return Object.entries(map).sort((a, b) => { const [d1, d2] = [a[0].split('.'), b[0].split('.')]; return new Date(2026, Number(d1[1]) - 1, Number(d1[0])).getTime() - new Date(2026, Number(d2[1]) - 1, Number(d2[0])).getTime(); });
+  }, [myLogs]);
 
-    if (startDate) {
-      query = query.gte('started_at', startDate.toISOString());
-    }
-
-    const [tripsRes, paymentsRes] = await Promise.all([
-      query,
-      supabase
-        .from('payments')
-        .select('*')
-        .eq('driver_id', profile.id)
-        .order('created_at', { ascending: false }),
-    ]);
-
-    setTrips(tripsRes.data || []);
-    setPayments(paymentsRes.data || []);
-    setLoading(false);
-  }, [profile, period]);
-
-  useEffect(() => {
-    fetchData();
-  }, [fetchData]);
-
-  const totalEarnings = trips.reduce((sum, t) => sum + Number(t.driver_earnings), 0);
-  const totalTrips = trips.length;
-  const totalDistance = trips.reduce((sum, t) => sum + Number(t.distance_km), 0);
-  const avgFare = totalTrips > 0 ? totalEarnings / totalTrips : 0;
-
-  // Group trips by day for chart
-  const dailyEarnings: Record<string, number> = {};
-  trips.forEach((t) => {
-    const day = new Date(t.started_at).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' });
-    dailyEarnings[day] = (dailyEarnings[day] || 0) + Number(t.driver_earnings);
-  });
-
-  const maxDaily = Math.max(...Object.values(dailyEarnings), 1);
-
-  if (loading) {
-    return <div className="text-center py-12 text-gray-400">Загрузка...</div>;
-  }
+  const maxDaily = dailyData.length ? Math.max(...dailyData.map(([, v]) => v), 1) : 1;
+  if (!profile) return null;
 
   return (
     <div className="space-y-6">
-      {/* Period selector */}
-      <div className="flex gap-2">
-        {(['week', 'month', 'all'] as const).map((p) => (
-          <button
-            key={p}
-            onClick={() => setPeriod(p)}
-            className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-colors ${
-              period === p ? 'bg-sky-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-            }`}
-          >
-            {p === 'week' ? 'Неделя' : p === 'month' ? 'Месяц' : 'Всё время'}
-          </button>
-        ))}
-      </div>
-
-      {/* Stats cards */}
+      <div className="flex gap-2">{(['week', 'month', 'all'] as const).map(p => <button key={p} onClick={() => setPeriod(p)} className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-colors ${period === p ? 'bg-sky-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>{p === 'week' ? 'Неделя' : p === 'month' ? 'Месяц' : 'Всё время'}</button>)}</div>
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="bg-white rounded-xl border border-gray-200 p-5">
-          <div className="flex items-center gap-2 text-gray-500 text-sm mb-2">
-            <DollarSign className="w-4 h-4" /> Заработок
-          </div>
-          <div className="text-2xl font-bold text-gray-900">{totalEarnings.toLocaleString('ru-RU')} ₽</div>
-        </div>
-        <div className="bg-white rounded-xl border border-gray-200 p-5">
-          <div className="flex items-center gap-2 text-gray-500 text-sm mb-2">
-            <TrendingUp className="w-4 h-4" /> Поездки
-          </div>
-          <div className="text-2xl font-bold text-gray-900">{totalTrips}</div>
-        </div>
-        <div className="bg-white rounded-xl border border-gray-200 p-5">
-          <div className="flex items-center gap-2 text-gray-500 text-sm mb-2">
-            <MapPin className="w-4 h-4" /> Расстояние
-          </div>
-          <div className="text-2xl font-bold text-gray-900">{totalDistance.toFixed(1)} км</div>
-        </div>
-        <div className="bg-white rounded-xl border border-gray-200 p-5">
-          <div className="flex items-center gap-2 text-gray-500 text-sm mb-2">
-            <Clock className="w-4 h-4" /> Средний заработок
-          </div>
-          <div className="text-2xl font-bold text-gray-900">{avgFare.toFixed(0)} ₽</div>
-        </div>
+        <Stat icon={DollarSign} label="Заработок" value={`${stats.totalEarnings.toLocaleString('ru-RU')} ₽`} color="text-sky-600" />
+        <Stat icon={TrendingUp} label="Поездки" value={stats.totalTrips.toLocaleString('ru-RU')} color="text-gray-900" />
+        <Stat icon={Clock} label="Часов" value={`${stats.totalHours.toFixed(1)} ч`} color="text-amber-600" />
+        <Stat icon={MapPin} label="Средний чек" value={`${stats.avgPerTrip.toFixed(0)} ₽`} color="text-emerald-600" />
       </div>
-
-      {/* Earnings chart */}
-      {Object.keys(dailyEarnings).length > 0 && (
-        <div className="bg-white rounded-xl border border-gray-200 p-6">
-          <h3 className="text-sm font-semibold text-gray-900 mb-4">График заработка</h3>
-          <div className="flex items-end gap-1.5 h-40">
-            {Object.entries(dailyEarnings).map(([day, amount]) => (
-              <div key={day} className="flex-1 flex flex-col items-center gap-1">
-                <div className="text-[10px] text-gray-500">{amount.toFixed(0)}</div>
-                <div
-                  className="w-full bg-sky-500 rounded-t-sm min-h-[4px] transition-all"
-                  style={{ height: `${(amount / maxDaily) * 100}%` }}
-                />
-                <div className="text-[10px] text-gray-400">{day}</div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Payments */}
-      {payments.length > 0 && (
-        <div className="bg-white rounded-xl border border-gray-200 p-6">
-          <h3 className="text-sm font-semibold text-gray-900 mb-4">Выплаты</h3>
-          <div className="space-y-3">
-            {payments.map((p) => (
-              <div key={p.id} className="flex items-center justify-between py-2 border-b border-gray-100 last:border-0">
-                <div>
-                  <div className="text-sm font-medium text-gray-900">
-                    {new Date(p.period_start).toLocaleDateString('ru-RU')} — {new Date(p.period_end).toLocaleDateString('ru-RU')}
-                  </div>
-                  <div className="text-xs text-gray-500 mt-0.5">
-                    {p.status === 'paid' ? `Оплачено ${p.paid_at ? new Date(p.paid_at).toLocaleDateString('ru-RU') : ''}` : 'Ожидает'}
-                  </div>
-                </div>
-                <div className="flex items-center gap-3">
-                  <span className="text-sm font-semibold text-gray-900">{Number(p.amount).toLocaleString('ru-RU')} ₽</span>
-                  <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${
-                    p.status === 'paid' ? 'bg-green-50 text-green-700' : 'bg-amber-50 text-amber-700'
-                  }`}>
-                    {p.status === 'paid' ? 'Оплачено' : 'Ожидает'}
-                  </span>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Trips list */}
-      <div className="bg-white rounded-xl border border-gray-200 p-6">
-        <h3 className="text-sm font-semibold text-gray-900 mb-4">История поездок</h3>
-        {trips.length === 0 ? (
-          <p className="text-gray-400 text-sm py-8 text-center">Поездок пока нет</p>
-        ) : (
-          <div className="space-y-3">
-            {trips.slice(0, 20).map((trip) => (
-              <div key={trip.id} className="flex items-center justify-between py-3 border-b border-gray-100 last:border-0">
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 text-sm text-gray-900">
-                    <MapPin className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />
-                    <span className="truncate">{trip.pickup_address}</span>
-                    <span className="text-gray-300">→</span>
-                    <span className="truncate">{trip.dropoff_address}</span>
-                  </div>
-                  <div className="flex items-center gap-3 mt-1 text-xs text-gray-500">
-                    <span>{new Date(trip.started_at).toLocaleDateString('ru-RU')}</span>
-                    {Number(trip.distance_km) > 0 && <span>{Number(trip.distance_km).toFixed(1)} км</span>}
-                    {trip.duration_min > 0 && <span>{trip.duration_min} мин</span>}
-                  </div>
-                </div>
-                <div className="text-right ml-4">
-                  <div className="text-sm font-semibold text-gray-900">{Number(trip.driver_earnings).toLocaleString('ru-RU')} ₽</div>
-                  <span className={`text-xs ${trip.status === 'completed' ? 'text-green-600' : 'text-red-500'}`}>
-                    {trip.status === 'completed' ? 'Завершена' : 'Отменена'}
-                  </span>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
+      {dailyData.length > 0 && (<div className="bg-white rounded-xl border border-gray-200 p-6"><h3 className="text-sm font-semibold text-gray-900 mb-4 flex items-center gap-2"><Calendar className="w-4 h-4" /> График заработка</h3><div className="flex items-end gap-1.5 h-40">{dailyData.map(([day, val]) => (<div key={day} className="flex-1 flex flex-col items-center gap-1"><div className="text-[10px] text-gray-500">{val.toFixed(0)}₽</div><div className="w-full bg-sky-500 rounded-t-sm min-h-[4px] transition-all hover:bg-sky-400" style={{ height: `${(val / maxDaily) * 100}%` }} /><div className="text-[10px] text-gray-400">{day}</div></div>))}</div></div>)}
+      <div className="bg-white rounded-xl border border-gray-200 p-6"><h3 className="text-sm font-semibold text-gray-900 mb-4">История смен</h3>{myLogs.length === 0 ? <p className="text-gray-400 text-sm py-8 text-center">Смен пока нет</p> : (<div className="space-y-3">{myLogs.map(l => (<div key={l.id} className="flex items-center justify-between py-3 border-b border-gray-100 last:border-0"><div className="flex-1 min-w-0"><div className="text-sm font-medium text-gray-900">{new Date(l.date + 'T00:00:00').toLocaleDateString('ru-RU', { weekday: 'short', day: 'numeric', month: 'short' })}</div><div className="flex items-center gap-3 mt-1 text-xs text-gray-500"><span>{l.start_time} — {l.end_time}</span><span>•</span><span>{l.trips_count} поездок</span>{l.had_accident && <><span>•</span><span className="text-red-500">ДТП</span></>}</div></div><div className="text-right ml-4"><div className="text-sm font-semibold text-gray-900">{(l.revenue || 0).toLocaleString('ru-RU')} ₽</div></div></div>))}</div>)}</div>
     </div>
   );
 }
+function Stat({ icon: Icon, label, value, color }: { icon: any, label: string, value: string | number, color: string }) { return (<div className="bg-white rounded-xl border border-gray-200 p-5"><div className="flex items-center gap-2 text-gray-500 text-sm mb-2"><Icon className="w-4 h-4" /> {label}</div><div className={`text-2xl font-bold ${color}`}>{value}</div></div>); }
