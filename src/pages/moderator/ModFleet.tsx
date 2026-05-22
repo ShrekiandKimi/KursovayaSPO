@@ -24,20 +24,31 @@ export default function ModFleet() {
     retired: { label: 'Снят с учёта', color: 'text-red-700 bg-red-50', icon: AlertTriangle },
   };
 
-  function handleAddCar(e: React.FormEvent) {
+  async function handleAddCar(e: React.FormEvent) {
     e.preventDefault();
     if (!newCar.make || !newCar.model || !newCar.plate_number) {
       alert('Заполните Марку, Модель и Гос. номер');
       return;
     }
-    addCar({
-      ...newCar,
-      insurance_expiry: newCar.insurance_expiry || null,
-      tech_inspection_expiry: newCar.tech_inspection_expiry || null,
-      medical_inspection_expiry: newCar.medical_inspection_expiry || null
-    });
-    setNewCar({ make: '', model: '', year: new Date().getFullYear(), plate_number: '', color: '', vin: '', insurance_expiry: '', tech_inspection_expiry: '', medical_inspection_expiry: '' });
-    setShowAdd(false);
+
+    try {
+      await addCar({
+        make: newCar.make,
+        model: newCar.model,
+        year: newCar.year,
+        plate_number: newCar.plate_number.toUpperCase(),
+        color: newCar.color || null,
+        vin: newCar.vin ? newCar.vin.toUpperCase() : null,
+        insurance_expiry: newCar.insurance_expiry || null,
+        tech_inspection_expiry: newCar.tech_inspection_expiry || null,
+        medical_inspection_expiry: newCar.medical_inspection_expiry || null
+      });
+      
+      setNewCar({ make: '', model: '', year: new Date().getFullYear(), plate_number: '', color: '', vin: '', insurance_expiry: '', tech_inspection_expiry: '', medical_inspection_expiry: '' });
+      setShowAdd(false);
+    } catch (err: any) {
+      alert('❌ Ошибка: ' + err.message);
+    }
   }
 
   return (
@@ -70,18 +81,45 @@ export default function ModFleet() {
         <div className="bg-white rounded-xl border border-gray-200 p-6">
           <h3 className="text-sm font-semibold text-gray-900 mb-4">Новый автомобиль</h3>
           <form onSubmit={handleAddCar} className="grid grid-cols-2 md:grid-cols-3 gap-4">
-            <div><label className="block text-xs font-medium text-gray-600 mb-1">Марка *</label><input type="text" required value={newCar.make} onChange={e => setNewCar({...newCar, make: e.target.value})} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-sky-500" /></div>
-            <div><label className="block text-xs font-medium text-gray-600 mb-1">Модель *</label><input type="text" required value={newCar.model} onChange={e => setNewCar({...newCar, model: e.target.value})} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-sky-500" /></div>
-            <div><label className="block text-xs font-medium text-gray-600 mb-1">Гос. номер *</label><input type="text" required value={newCar.plate_number} onChange={e => setNewCar({...newCar, plate_number: e.target.value})} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-sky-500" /></div>
-            <div><label className="block text-xs font-medium text-gray-600 mb-1">Год</label><input type="number" value={newCar.year} onChange={e => setNewCar({...newCar, year: Number(e.target.value)})} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-sky-500" /></div>
-            <div><label className="block text-xs font-medium text-gray-600 mb-1">Цвет</label><input type="text" value={newCar.color} onChange={e => setNewCar({...newCar, color: e.target.value})} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-sky-500" /></div>
-            <div><label className="block text-xs font-medium text-gray-600 mb-1">VIN</label><input type="text" value={newCar.vin} onChange={e => setNewCar({...newCar, vin: e.target.value})} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-sky-500" /></div>
-            <div><label className="block text-xs font-medium text-gray-600 mb-1">Страховка до</label><input type="date" value={newCar.insurance_expiry} onChange={e => setNewCar({...newCar, insurance_expiry: e.target.value})} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-sky-500" /></div>
-            <div><label className="block text-xs font-medium text-gray-600 mb-1">ТО до</label><input type="date" value={newCar.tech_inspection_expiry} onChange={e => setNewCar({...newCar, tech_inspection_expiry: e.target.value})} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-sky-500" /></div>
-            <div><label className="block text-xs font-medium text-gray-600 mb-1">Медосмотр до</label><input type="date" value={newCar.medical_inspection_expiry} onChange={e => setNewCar({...newCar, medical_inspection_expiry: e.target.value})} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-sky-500" /></div>
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">Марка *</label>
+              <input type="text" required value={newCar.make} onChange={e => setNewCar(prev => ({...prev, make: e.target.value}))} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-sky-500" />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">Модель *</label>
+              <input type="text" required value={newCar.model} onChange={e => setNewCar(prev => ({...prev, model: e.target.value}))} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-sky-500" />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">Гос. номер *</label>
+              <input type="text" required value={newCar.plate_number} onChange={e => setNewCar(prev => ({...prev, plate_number: e.target.value.toUpperCase()}))} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-sky-500" />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">Год</label>
+              <input type="number" value={newCar.year} onChange={e => setNewCar(prev => ({...prev, year: Number(e.target.value)}))} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-sky-500" />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">Цвет</label>
+              <input type="text" value={newCar.color} onChange={e => setNewCar(prev => ({...prev, color: e.target.value}))} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-sky-500" />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">VIN</label>
+              <input type="text" value={newCar.vin} onChange={e => setNewCar(prev => ({...prev, vin: e.target.value.toUpperCase()}))} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-sky-500" />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">Страховка до</label>
+              <input type="date" value={newCar.insurance_expiry} onChange={e => setNewCar(prev => ({...prev, insurance_expiry: e.target.value}))} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-sky-500" />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">ТО до</label>
+              <input type="date" value={newCar.tech_inspection_expiry} onChange={e => setNewCar(prev => ({...prev, tech_inspection_expiry: e.target.value}))} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-sky-500" />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">Медосмотр до</label>
+              <input type="date" value={newCar.medical_inspection_expiry} onChange={e => setNewCar(prev => ({...prev, medical_inspection_expiry: e.target.value}))} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-sky-500" />
+            </div>
             <div className="col-span-2 md:col-span-3 flex gap-2 mt-2">
               <button type="submit" className="px-4 py-2 bg-sky-600 hover:bg-sky-700 text-white text-sm font-medium rounded-lg transition-colors">Сохранить</button>
-              <button type="button" onClick={() => setShowAdd(false)} className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-medium rounded-lg transition-colors">Отмена</button>
+              <button type="button" onClick={() => { setShowAdd(false); setNewCar({ make: '', model: '', year: new Date().getFullYear(), plate_number: '', color: '', vin: '', insurance_expiry: '', tech_inspection_expiry: '', medical_inspection_expiry: '' }); }} className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-medium rounded-lg transition-colors">Отмена</button>
             </div>
           </form>
         </div>

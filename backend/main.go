@@ -1,3 +1,4 @@
+// Файл: D:/SPOkursach/project/backend/main.go
 package main
 
 import (
@@ -14,7 +15,7 @@ import (
 
 var db *pgxpool.Pool
 
-// --- Модели данных ---
+// --- Модели (с ответами) ---
 type Car struct {
 	ID                      string  `json:"id"`
 	Make                    string  `json:"make"`
@@ -25,10 +26,9 @@ type Car struct {
 	VIN                     *string `json:"vin"`
 	Status                  string  `json:"status"`
 	AssignedDriverID        *string `json:"assigned_driver_id"`
-	DriverName              *string `json:"driver_name,omitempty"`
-	InsuranceExpiry         *string `json:"insurance_expiry,omitempty"`
-	TechInspectionExpiry    *string `json:"tech_inspection_expiry,omitempty"`
-	MedicalInspectionExpiry *string `json:"medical_inspection_expiry,omitempty"`
+	InsuranceExpiry         *string `json:"insurance_expiry"`
+	TechInspectionExpiry    *string `json:"tech_inspection_expiry"`
+	MedicalInspectionExpiry *string `json:"medical_inspection_expiry"`
 	CreatedAt               string  `json:"created_at"`
 }
 
@@ -59,7 +59,14 @@ type Log struct {
 // --- CORS Middleware ---
 func corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "http://localhost:5173")
+		origin := r.Header.Get("Origin")
+		allowed := []string{"http://localhost", "http://localhost:5173", "http://localhost:80", "http://127.0.0.1"}
+		for _, a := range allowed {
+			if origin == a {
+				w.Header().Set("Access-Control-Allow-Origin", origin)
+				break
+			}
+		}
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
 		if r.Method == "OPTIONS" {
@@ -70,96 +77,62 @@ func corsMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-// --- Helpers ---
 func respondJSON(w http.ResponseWriter, status int, data interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	if err := json.NewEncoder(w).Encode(data); err != nil {
-		log.Printf("❌ JSON encode error: %v", err)
-	}
+	json.NewEncoder(w).Encode(data)
+}
+func respondError(w http.ResponseWriter, status int, msg string) {
+	respondJSON(w, status, map[string]string{"error": msg})
 }
 
-func respondError(w http.ResponseWriter, status int, message string) {
-	respondJSON(w, status, map[string]string{"error": message})
+// --- Handlers: Health ---
+func pingHandler(w http.ResponseWriter, r *http.Request) {
+	if err := db.Ping(r.Context()); err != nil {
+		respondError(w, 500, "DB error")
+		return
+	}
+	respondJSON(w, 200, map[string]string{"status": "ok"})
 }
 
 // --- Handlers: Cars ---
 func getCarsHandler(w http.ResponseWriter, r *http.Request) {
 	rows, err := db.Query(r.Context(), `
-		SELECT 
-			c.id, 
-			c.make, 
-			c.model, 
-			c.year, 
-			c.plate_number, 
-			c.color, 
-			c.vin, 
-			c.status, 
-			c.assigned_driver_id, 
-			to_char(c.insurance_expiry, 'YYYY-MM-DD') as insurance_expiry,
-			to_char(c.tech_inspection_expiry, 'YYYY-MM-DD') as tech_inspection_expiry,
-			to_char(c.medical_inspection_expiry, 'YYYY-MM-DD') as medical_inspection_expiry,
-			to_char(c.created_at, 'YYYY-MM-DD"T"HH24:MI:SS"Z"') as created_at,
-			p.full_name as driver_name
-		FROM cars c 
-		LEFT JOIN users p ON c.assigned_driver_id = p.id
-		ORDER BY c.created_at DESC
-	`)
+		SELECT id, make, model, year, plate_number, color, vin, status, 
+		       assigned_driver_id, 
+		       to_char(insurance_expiry, 'YYYY-MM-DD'),
+		       to_char(tech_inspection_expiry, 'YYYY-MM-DD'),
+		       to_char(medical_inspection_expiry, 'YYYY-MM-DD'),
+		       to_char(created_at, 'YYYY-MM-DD"T"HH24:MI:SS"Z"')
+		FROM cars ORDER BY created_at DESC`)
 	if err != nil {
-		log.Printf("❌ DB query error: %v", err)
-		respondError(w, http.StatusInternalServerError, "DB error: "+err.Error())
+		log.Println("❌ DB error:", err)
+		respondError(w, 500, "DB error")
 		return
 	}
 	defer rows.Close()
-
 	var cars []Car
 	for rows.Next() {
-		var car Car
-		var color, vin, assignedDriverID, insuranceExpiry, techInspectionExpiry, medicalInspectionExpiry, driverName *string
-		var createdAt string
-		
-		err := rows.Scan(
-			&car.ID, 
-			&car.Make, 
-			&car.Model, 
-			&car.Year, 
-			&car.PlateNumber,
-			&color, 
-			&vin, 
-			&car.Status, 
-			&assignedDriverID,
-			&insuranceExpiry, 
-			&techInspectionExpiry, 
-			&medicalInspectionExpiry, 
-			&createdAt,
-			&driverName,
-		)
+		var c Car
+		err := rows.Scan(&c.ID, &c.Make, &c.Model, &c.Year, &c.PlateNumber,
+			&c.Color, &c.VIN, &c.Status, &c.AssignedDriverID,
+			&c.InsuranceExpiry, &c.TechInspectionExpiry, &c.MedicalInspectionExpiry, &c.CreatedAt)
 		if err != nil {
-			log.Printf("❌ Scan error: %v", err)
-			respondError(w, http.StatusInternalServerError, "Scan error: "+err.Error())
-			return
+			log.Println("❌ Scan error:", err)
+			continue
 		}
-		
-		car.Color = color
-		car.VIN = vin
-		car.AssignedDriverID = assignedDriverID
-		car.InsuranceExpiry = insuranceExpiry
-		car.TechInspectionExpiry = techInspectionExpiry
-		car.MedicalInspectionExpiry = medicalInspectionExpiry
-		car.CreatedAt = createdAt
-		car.DriverName = driverName
-		
-		cars = append(cars, car)
+		cars = append(cars, c)
 	}
-	respondJSON(w, http.StatusOK, cars)
+	respondJSON(w, 200, cars)
 }
 
+// 🔥 ИСПРАВЛЕНО: Добавлены JSON-теги для запроса
 func addCarHandler(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Make                    string  `json:"make"`
 		Model                   string  `json:"model"`
+		PlateNumber             string  `json:"plate_number"`  // ← КЛЮЧЕВОЕ ИСПРАВЛЕНИЕ
 		Year                    int     `json:"year"`
-		PlateNumber             string  `json:"plate_number"`
 		Color                   *string `json:"color"`
 		VIN                     *string `json:"vin"`
 		InsuranceExpiry         *string `json:"insurance_expiry"`
@@ -167,21 +140,26 @@ func addCarHandler(w http.ResponseWriter, r *http.Request) {
 		MedicalInspectionExpiry *string `json:"medical_inspection_expiry"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		respondError(w, http.StatusBadRequest, "Invalid JSON")
+		log.Println("❌ JSON decode error:", err)
+		respondError(w, 400, "Invalid JSON: "+err.Error())
 		return
 	}
+	
+	log.Printf("📦 Received car: %+v", req) // 🔍 Лог для отладки
 
 	_, err := db.Exec(r.Context(), `
-		INSERT INTO cars (make, model, year, plate_number, color, vin, status, insurance_expiry, tech_inspection_expiry, medical_inspection_expiry, created_at)
-		VALUES ($1, $2, $3, $4, $5, $6, 'active', $7, $8, $9, NOW())
-	`, req.Make, req.Model, req.Year, req.PlateNumber, req.Color, req.VIN, req.InsuranceExpiry, req.TechInspectionExpiry, req.MedicalInspectionExpiry)
-
+		INSERT INTO cars (make, model, year, plate_number, color, vin, status, 
+			insurance_expiry, tech_inspection_expiry, medical_inspection_expiry, created_at)
+		VALUES ($1,$2,$3,$4,$5,$6,'active',$7,$8,$9,NOW())`,
+		req.Make, req.Model, req.Year, req.PlateNumber, req.Color, req.VIN,
+		req.InsuranceExpiry, req.TechInspectionExpiry, req.MedicalInspectionExpiry)
 	if err != nil {
-		log.Printf("❌ Insert error: %v", err)
-		respondError(w, http.StatusInternalServerError, "Insert error: "+err.Error())
+		log.Println("❌ Insert error:", err)
+		respondError(w, 500, "Insert error: "+err.Error())
 		return
 	}
-	respondJSON(w, http.StatusCreated, map[string]string{"status": "created"})
+	log.Println("✅ Car created:", req.PlateNumber)
+	respondJSON(w, 201, map[string]string{"status": "created"})
 }
 
 func assignCarHandler(w http.ResponseWriter, r *http.Request) {
@@ -190,39 +168,23 @@ func assignCarHandler(w http.ResponseWriter, r *http.Request) {
 		DriverID string `json:"driver_id"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		log.Printf("❌ JSON decode error: %v", err)
-		respondError(w, http.StatusBadRequest, "Invalid JSON")
+		respondError(w, 400, "Invalid JSON")
 		return
 	}
-
-	log.Printf("🔗 Assign request: car_id=%s, driver_id=%s", req.CarID, req.DriverID)
-
-	var driverExists bool
-	err := db.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM users WHERE id = $1)`, req.DriverID).Scan(&driverExists)
+	var exists bool
+	db.QueryRow(r.Context(), "SELECT EXISTS(SELECT 1 FROM users WHERE id = $1)", req.DriverID).Scan(&exists)
+	if !exists {
+		respondError(w, 404, "Driver not found")
+		return
+	}
+	_, err := db.Exec(r.Context(), `UPDATE cars SET assigned_driver_id = $1 WHERE id = $2`, req.DriverID, req.CarID)
 	if err != nil {
-		log.Printf("❌ Check driver error: %v", err)
-		respondError(w, http.StatusInternalServerError, "Check error")
+		log.Println("❌ Assign error:", err)
+		respondError(w, 500, "Assign error: "+err.Error())
 		return
 	}
-
-	if !driverExists {
-		log.Printf("❌ Driver NOT found in DB: %s", req.DriverID)
-		respondError(w, http.StatusNotFound, "Driver not found in database")
-		return
-	}
-
-	result, err := db.Exec(r.Context(), `
-		UPDATE cars SET assigned_driver_id = $1 WHERE id = $2
-	`, req.DriverID, req.CarID)
-	
-	if err != nil {
-		log.Printf("❌ DB Exec error: %v", err)
-		respondError(w, http.StatusInternalServerError, "Assign error: "+err.Error())
-		return
-	}
-	
-	log.Printf("✅ Rows affected: %d", result.RowsAffected())
-	respondJSON(w, http.StatusOK, map[string]string{"status": "assigned"})
+	log.Println("✅ Car assigned:", req.CarID, "→", req.DriverID)
+	respondJSON(w, 200, map[string]string{"status": "assigned"})
 }
 
 func unassignCarHandler(w http.ResponseWriter, r *http.Request) {
@@ -230,17 +192,17 @@ func unassignCarHandler(w http.ResponseWriter, r *http.Request) {
 		CarID string `json:"car_id"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		respondError(w, http.StatusBadRequest, "Invalid JSON")
+		respondError(w, 400, "Invalid JSON")
 		return
 	}
-
 	_, err := db.Exec(r.Context(), `UPDATE cars SET assigned_driver_id = NULL WHERE id = $1`, req.CarID)
 	if err != nil {
-		log.Printf("❌ Unassign error: %v", err)
-		respondError(w, http.StatusInternalServerError, "Unassign error")
+		log.Println("❌ Unassign error:", err)
+		respondError(w, 500, "Unassign error: "+err.Error())
 		return
 	}
-	respondJSON(w, http.StatusOK, map[string]string{"status": "unassigned"})
+	log.Println("✅ Car unassigned:", req.CarID)
+	respondJSON(w, 200, map[string]string{"status": "unassigned"})
 }
 
 func updateCarStatusHandler(w http.ResponseWriter, r *http.Request) {
@@ -249,191 +211,129 @@ func updateCarStatusHandler(w http.ResponseWriter, r *http.Request) {
 		Status string `json:"status"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		respondError(w, http.StatusBadRequest, "Invalid JSON")
+		respondError(w, 400, "Invalid JSON")
 		return
 	}
-
 	_, err := db.Exec(r.Context(), `UPDATE cars SET status = $1 WHERE id = $2`, req.Status, req.CarID)
 	if err != nil {
-		log.Printf("❌ Update status error: %v", err)
-		respondError(w, http.StatusInternalServerError, "Update error")
+		log.Println("❌ Update error:", err)
+		respondError(w, 500, "Update error: "+err.Error())
 		return
 	}
-	respondJSON(w, http.StatusOK, map[string]string{"status": "updated"})
+	log.Println("✅ Car status updated:", req.CarID, "→", req.Status)
+	respondJSON(w, 200, map[string]string{"status": "updated"})
 }
 
 // --- Handlers: Drivers / Auth ---
 func getDriversHandler(w http.ResponseWriter, r *http.Request) {
 	rows, err := db.Query(r.Context(), `
-		SELECT 
-			u.id, 
-			u.full_name, 
-			u.email, 
-			u.phone, 
-			u.role, 
-			u.is_active,
-			to_char(u.created_at, 'YYYY-MM-DD"T"HH24:MI:SS"Z"') as created_at,
-			(
-				SELECT c.id FROM cars c 
-				WHERE c.assigned_driver_id = u.id AND c.status = 'active'
-				LIMIT 1
-			) as assigned_car_id
-		FROM users u 
-		WHERE u.role = 'driver'
-		ORDER BY u.created_at DESC
-	`)
+		SELECT id, full_name, email, phone, role, is_active, 
+		       to_char(created_at, 'YYYY-MM-DD"T"HH24:MI:SS"Z"'),
+		       (SELECT id FROM cars WHERE assigned_driver_id = users.id AND status='active' LIMIT 1)
+		FROM users WHERE role='driver' ORDER BY created_at DESC`)
 	if err != nil {
-		log.Printf("❌ DB query error: %v", err)
-		respondError(w, http.StatusInternalServerError, "DB error")
+		log.Println("❌ DB error:", err)
+		respondError(w, 500, "DB error")
 		return
 	}
 	defer rows.Close()
-
 	var drivers []Driver
 	for rows.Next() {
 		var d Driver
-		var assignedCarID *string
-		
-		err := rows.Scan(
-			&d.ID, &d.FullName, &d.Email, &d.Phone, &d.Role, &d.IsActive, &d.CreatedAt,
-			&assignedCarID,
-		)
+		err := rows.Scan(&d.ID, &d.FullName, &d.Email, &d.Phone, &d.Role, &d.IsActive, &d.CreatedAt, &d.AssignedCarID)
 		if err != nil {
-			log.Printf("❌ Scan error: %v", err)
-			respondError(w, http.StatusInternalServerError, "Scan error")
-			return
+			log.Println("❌ Scan error:", err)
+			continue
 		}
-		
-		d.AssignedCarID = assignedCarID
 		drivers = append(drivers, d)
 	}
-	respondJSON(w, http.StatusOK, drivers)
+	respondJSON(w, 200, drivers)
 }
 
 func registerHandler(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Email    string `json:"email"`
-		Password string `json:"password"`
-		FullName string `json:"full_name"`
-		Phone    string `json:"phone"`
-		Role     string `json:"role"`
+		Email, Password, FullName, Phone, Role string
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		respondError(w, http.StatusBadRequest, "Invalid JSON")
+		respondError(w, 400, "Invalid JSON")
 		return
 	}
-
 	hash, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
 	if err != nil {
-		log.Printf("❌ Hash error: %v", err)
-		respondError(w, http.StatusInternalServerError, "Hash error")
+		respondError(w, 500, "Hash error")
 		return
 	}
-
-	var userID string
+	var id string
 	err = db.QueryRow(r.Context(), `
 		INSERT INTO users (email, password_hash, full_name, phone, role, is_active, created_at)
-		VALUES ($1, $2, $3, $4, $5, true, NOW())
-		RETURNING id
-	`, req.Email, string(hash), req.FullName, req.Phone, req.Role).Scan(&userID)
-
+		VALUES ($1,$2,$3,$4,$5,true,NOW()) RETURNING id`,
+		req.Email, string(hash), req.FullName, req.Phone, req.Role).Scan(&id)
 	if err != nil {
-		log.Printf("❌ DB insert error: %v", err)
 		if strings.Contains(err.Error(), "duplicate") {
-			respondError(w, http.StatusConflict, "Email already exists")
+			respondError(w, 409, "Email exists")
 		} else {
-			respondError(w, http.StatusInternalServerError, "Registration failed")
+			respondError(w, 500, "Register error")
 		}
 		return
 	}
-
-	log.Println("✅ User registered:", userID)
-	respondJSON(w, http.StatusCreated, map[string]interface{}{
-		"status":  "registered",
-		"user_id": userID,
-		"email":   req.Email,
-		"role":    req.Role,
-	})
+	log.Println("✅ User registered:", id)
+	respondJSON(w, 201, map[string]string{"status": "registered", "user_id": id})
 }
 
 func loginHandler(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Email    string `json:"email"`
-		Password string `json:"password"`
+		Email, Password string
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		respondError(w, http.StatusBadRequest, "Invalid JSON")
+		respondError(w, 400, "Invalid JSON")
 		return
 	}
-
-	var userID, role, fullName, phone, passwordHash string
-	var createdAt string
-	
+	var userID, role, fullName, phone, passwordHash, createdAt string
 	err := db.QueryRow(r.Context(), `
-		SELECT id, password_hash, full_name, phone, role, 
-		       to_char(created_at, 'YYYY-MM-DD"T"HH24:MI:SS"Z"') as created_at
-		FROM users WHERE email = $1 AND is_active = true
-	`, req.Email).Scan(&userID, &passwordHash, &fullName, &phone, &role, &createdAt)
-
+		SELECT id, password_hash, full_name, phone, role, to_char(created_at, 'YYYY-MM-DD"T"HH24:MI:SS"Z"')
+		FROM users WHERE email = $1 AND is_active = true`,
+		req.Email).Scan(&userID, &passwordHash, &fullName, &phone, &role, &createdAt)
 	if err != nil {
-		if err.Error() == "no rows in result set" {
-			respondError(w, http.StatusUnauthorized, "Invalid credentials")
-		} else {
-			log.Printf("❌ Login query error: %v", err)
-			respondError(w, http.StatusInternalServerError, "Login error")
-		}
+		respondError(w, 401, "Invalid credentials")
 		return
 	}
-
 	if err := bcrypt.CompareHashAndPassword([]byte(passwordHash), []byte(req.Password)); err != nil {
-		respondError(w, http.StatusUnauthorized, "Invalid credentials")
+		respondError(w, 401, "Invalid credentials")
 		return
 	}
-
 	log.Println("✅ User logged in:", userID)
-	respondJSON(w, http.StatusOK, map[string]interface{}{
-		"status":    "ok",
-		"user_id":   userID,
-		"email":     req.Email,
-		"full_name": fullName,
-		"phone":     phone,
-		"role":      role,
+	respondJSON(w, 200, map[string]interface{}{
+		"status": "ok", "user_id": userID, "email": req.Email,
+		"full_name": fullName, "phone": phone, "role": role,
 	})
 }
 
 // --- Handlers: Logs ---
 func getLogsHandler(w http.ResponseWriter, r *http.Request) {
 	driverID := r.URL.Query().Get("driver_id")
-	
 	query := `SELECT id, driver_id, date, start_time, end_time, revenue, trips_count, had_accident, notes, 
-	                 to_char(created_at, 'YYYY-MM-DD"T"HH24:MI:SS"Z"') as created_at 
-	          FROM logs`
+	                 to_char(created_at, 'YYYY-MM-DD"T"HH24:MI:SS"Z"') as created_at FROM logs`
 	args := []interface{}{}
-	
 	if driverID != "" {
 		query += " WHERE driver_id = $1"
 		args = append(args, driverID)
 	}
 	query += " ORDER BY date DESC"
-
 	rows, err := db.Query(r.Context(), query, args...)
 	if err != nil {
-		log.Printf("❌ DB query error: %v", err)
-		respondError(w, http.StatusInternalServerError, "DB error")
+		log.Println("❌ DB error:", err)
+		respondError(w, 500, "DB error")
 		return
 	}
 	defer rows.Close()
-
 	var logs []Log
 	for rows.Next() {
 		var l Log
-		var createdAt string
-		rows.Scan(&l.ID, &l.DriverID, &l.Date, &l.StartTime, &l.EndTime, 
-			&l.Revenue, &l.TripsCount, &l.HadAccident, &l.Notes, &createdAt)
-		l.CreatedAt = createdAt
+		rows.Scan(&l.ID, &l.DriverID, &l.Date, &l.StartTime, &l.EndTime,
+			&l.Revenue, &l.TripsCount, &l.HadAccident, &l.Notes, &l.CreatedAt)
 		logs = append(logs, l)
 	}
-	respondJSON(w, http.StatusOK, logs)
+	respondJSON(w, 200, logs)
 }
 
 func addLogHandler(w http.ResponseWriter, r *http.Request) {
@@ -448,31 +348,19 @@ func addLogHandler(w http.ResponseWriter, r *http.Request) {
 		Notes       string  `json:"notes"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		respondError(w, http.StatusBadRequest, "Invalid JSON")
+		respondError(w, 400, "Invalid JSON")
 		return
 	}
-
 	_, err := db.Exec(r.Context(), `
 		INSERT INTO logs (driver_id, date, start_time, end_time, revenue, trips_count, had_accident, notes, created_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
-	`, req.DriverID, req.Date, req.StartTime, req.EndTime, req.Revenue, req.TripsCount, req.HadAccident, req.Notes)
-
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,NOW())`,
+		req.DriverID, req.Date, req.StartTime, req.EndTime, req.Revenue, req.TripsCount, req.HadAccident, req.Notes)
 	if err != nil {
-		log.Printf("❌ Insert log error: %v", err)
-		respondError(w, http.StatusInternalServerError, "Insert error")
+		log.Println("❌ Insert log error:", err)
+		respondError(w, 500, "Insert error")
 		return
 	}
-	respondJSON(w, http.StatusCreated, map[string]string{"status": "created"})
-}
-
-// --- Health check ---
-func pingHandler(w http.ResponseWriter, r *http.Request) {
-	if err := db.Ping(r.Context()); err != nil {
-		log.Printf("❌ DB ping error: %v", err)
-		respondError(w, http.StatusInternalServerError, "DB not available")
-		return
-	}
-	respondJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+	respondJSON(w, 201, map[string]string{"status": "created"})
 }
 
 // --- Main ---
@@ -480,44 +368,56 @@ func main() {
 	ctx := context.Background()
 	connStr := os.Getenv("DATABASE_URL")
 	if connStr == "" {
-		connStr = "postgres://postgres:1488@localhost:5432/taxopark?sslmode=disable"
+		connStr = "postgres://postgres:postgres123@postgres:5432/taxopark?sslmode=disable"
 	}
-
 	var err error
 	db, err = pgxpool.New(ctx, connStr)
 	if err != nil {
-		log.Fatal("❌ DB connection failed:", err)
+		log.Fatal("DB connect failed:", err)
 	}
 	defer db.Close()
-
 	if err := db.Ping(ctx); err != nil {
-		log.Fatal("❌ DB ping failed:", err)
+		log.Println("⚠️ DB ping warning:", err)
+	} else {
+		log.Println("✅ Connected to PostgreSQL")
 	}
-	log.Println("✅ Connected to PostgreSQL")
 
 	mux := http.NewServeMux()
-	
-	// === ROUTES: Cars ===
-	mux.HandleFunc("GET /api/cars", getCarsHandler)
-	mux.HandleFunc("POST /api/cars", addCarHandler)
-	mux.HandleFunc("POST /api/cars/assign", assignCarHandler)
-	mux.HandleFunc("POST /api/cars/unassign", unassignCarHandler)
-	mux.HandleFunc("POST /api/cars/status", updateCarStatusHandler)
-	
-	// === ROUTES: Drivers / Auth ===
-	mux.HandleFunc("GET /api/drivers", getDriversHandler)
-	mux.HandleFunc("POST /api/auth/register", registerHandler)
-	mux.HandleFunc("POST /api/auth/login", loginHandler)
-	
-	// === ROUTES: Logs ===
-	mux.HandleFunc("GET /api/logs", getLogsHandler)
-	mux.HandleFunc("POST /api/logs", addLogHandler)
-	
-	// === ROUTES: Health ===
-	mux.HandleFunc("GET /api/ping", pingHandler)
 
-	handler := corsMiddleware(mux)
-	
-	log.Println("🚀 Go API running on http://localhost:8080")
-	log.Fatal(http.ListenAndServe(":8080", handler))
+	// === 🔥 РЕГИСТРАЦИЯ МАРШРУТОВ ===
+	// 🚗 Cars
+	mux.HandleFunc("/api/cars", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			getCarsHandler(w, r)
+		} else if r.Method == http.MethodPost {
+			addCarHandler(w, r)
+		} else {
+			respondError(w, 405, "Method not allowed")
+		}
+	})
+	mux.HandleFunc("/api/cars/assign", assignCarHandler)
+	mux.HandleFunc("/api/cars/unassign", unassignCarHandler)
+	mux.HandleFunc("/api/cars/status", updateCarStatusHandler)
+
+	// 👥 Drivers / Auth
+	mux.HandleFunc("/api/drivers", getDriversHandler)
+	mux.HandleFunc("/api/auth/register", registerHandler)
+	mux.HandleFunc("/api/auth/login", loginHandler)
+
+	// 📝 Logs
+	mux.HandleFunc("/api/logs", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			getLogsHandler(w, r)
+		} else if r.Method == http.MethodPost {
+			addLogHandler(w, r)
+		} else {
+			respondError(w, 405, "Method not allowed")
+		}
+	})
+
+	// ❤️ Health
+	mux.HandleFunc("/api/ping", pingHandler)
+
+	log.Println("🚀 API running on :8080")
+	log.Fatal(http.ListenAndServe(":8080", corsMiddleware(mux)))
 }

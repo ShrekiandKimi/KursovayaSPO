@@ -1,28 +1,28 @@
-# Используем официальный образ Go
-FROM golang:1.21-alpine AS builder
+# Файл: D:/SPOkursach/project/backend/Dockerfile
+FROM golang:1.22-alpine AS builder
 
-# Устанавливаем рабочие директории
 WORKDIR /app
 
-# Копируем go.mod и go.sum
-COPY go.mod go.sum ./
-RUN go mod download
+# 1. Копируем только go.mod (без go.sum)
+COPY go.mod ./
 
-# Копируем исходный код
+# 2. Скачиваем зависимости и создаём go.sum ВНУТРИ контейнера
+RUN go mod download
+RUN go mod verify
+
+# 3. Копируем исходный код
 COPY . .
 
-# Собираем приложение
+# 4. Запускаем go mod tidy ВНУТРИ контейнера (он создаст правильный go.sum)
+RUN go mod tidy
+
+# 5. Собираем приложение
 RUN go build -o main .
 
-# Финальный образ (меньше размер)
+# Финальный образ
 FROM alpine:latest
 RUN apk --no-cache add ca-certificates
 WORKDIR /root/
 COPY --from=builder /app/main .
-COPY --from=builder /app/.env ./.env
-
-# Открываем порт
 EXPOSE 8080
-
-# Запускаем
 CMD ["./main"]

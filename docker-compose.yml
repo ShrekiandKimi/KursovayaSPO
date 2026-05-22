@@ -1,7 +1,7 @@
+# Файл: D:/SPOkursach/project/docker-compose.yml
 version: '3.8'
 
 services:
-  # 🐘 PostgreSQL
   postgres:
     image: postgres:15-alpine
     container_name: taxopark_db
@@ -22,12 +22,11 @@ services:
       timeout: 5s
       retries: 5
 
-  # 🔧 pgAdmin (управление БД через браузер)
   pgadmin:
     image: dpage/pgadmin4:latest
     container_name: taxopark_pgadmin
     environment:
-      PGADMIN_DEFAULT_EMAIL: admin@taxopark.local
+      PGADMIN_DEFAULT_EMAIL: admin@taxopark.com
       PGADMIN_DEFAULT_PASSWORD: admin123
     ports:
       - "5050:80"
@@ -35,13 +34,10 @@ services:
       - postgres
     networks:
       - taxopark_network
-    volumes:
-      - pgadmin_data:/var/lib/pgadmin
 
-  # 🚀 Go Backend
   backend:
     build:
-      context: ./backend
+      context: ./backend      # <--- Собирает из папки backend
       dockerfile: Dockerfile
     container_name: taxopark_backend
     ports:
@@ -53,13 +49,11 @@ services:
         condition: service_healthy
     networks:
       - taxopark_network
-    restart: unless-stopped
 
-  # 🎨 React Frontend
   frontend:
     build:
-      context: ./frontend
-      dockerfile: Dockerfile
+      context: .              # <--- Собирает из текущей папки (корня)
+      dockerfile: Dockerfile  # <--- Использует Dockerfile из корня
     container_name: taxopark_frontend
     ports:
       - "80:80"
@@ -67,7 +61,6 @@ services:
       - backend
     networks:
       - taxopark_network
-    restart: unless-stopped
 
 networks:
   taxopark_network:
@@ -75,4 +68,3 @@ networks:
 
 volumes:
   postgres_data:
-  pgadmin_data:

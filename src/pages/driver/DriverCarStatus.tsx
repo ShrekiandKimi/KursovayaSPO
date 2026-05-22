@@ -23,6 +23,9 @@ function isExpired(dateStr: string | null | undefined): boolean {
 }
 
 export default function DriverCarStatus() {
+  console.log('✅ DriverCarStatus компонент загрузился');
+  console.log(' Cars from context:', cars);
+  console.log('👤 Profile from context:', profile);
   const { profile } = useAuth();
   const { cars } = useData();
 
@@ -30,7 +33,14 @@ export default function DriverCarStatus() {
     if (!profile) return null;
     return cars.find(c => c.assigned_driver_id === profile.id && c.status === 'active') || null;
   }, [profile, cars]);
-
+    // 🔍 ОТЛАДКА: смотри в Console (F12)
+  if (myCar) {
+    console.log('🔎 DriverCarStatus: myCar dates', {
+      insurance: myCar.insurance_expiry,
+      tech: myCar.tech_inspection_expiry,
+      medical: myCar.medical_inspection_expiry
+    });
+  }
   if (!myCar) {
     return (
       <div className="bg-white rounded-xl border border-gray-200 p-12 text-center">
@@ -78,6 +88,27 @@ export default function DriverCarStatus() {
             <p className="text-sm text-gray-500">{myCar.plate_number} · {myCar.color} · {myCar.year}</p>
             {myCar.vin && <p className="text-xs text-gray-400 mt-0.5">VIN: {myCar.vin}</p>}
           </div>
+                  {/* 🔽 Даты документов (безопасный блок) */}
+        <div className="mt-4 pt-4 border-t border-gray-100 grid grid-cols-3 gap-3 text-xs">
+          {myCar.insurance_expiry && (
+            <div className="bg-sky-50 text-sky-700 px-3 py-2 rounded-lg text-center">
+              <div className="opacity-70 mb-1">🛡️ Страховка</div>
+              <div className="font-semibold">{myCar.insurance_expiry}</div>
+            </div>
+          )}
+          {myCar.tech_inspection_expiry && (
+            <div className="bg-amber-50 text-amber-700 px-3 py-2 rounded-lg text-center">
+              <div className="opacity-70 mb-1">🔧 Техосмотр</div>
+              <div className="font-semibold">{myCar.tech_inspection_expiry}</div>
+            </div>
+          )}
+          {myCar.medical_inspection_expiry && (
+            <div className="bg-emerald-50 text-emerald-700 px-3 py-2 rounded-lg text-center">
+              <div className="opacity-70 mb-1">🩺 Медосмотр</div>
+              <div className="font-semibold">{myCar.medical_inspection_expiry}</div>
+            </div>
+          )}
+        </div>
         </div>
       </div>
 

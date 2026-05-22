@@ -21,7 +21,20 @@ export default function DriverCalendar() {
     if (!profile) return null;
     return cars.find(c => c.assigned_driver_id === profile.id);
   }, [profile, cars]);
-
+    // 🔽 КАЛЕНДАРЬ: формируем список событий из дат машины
+  const events = useMemo(() => {
+    if (!myCar) return [];
+    
+    const list = [];
+    // Если есть страховка — добавляем в список
+    if (myCar.insurance_expiry) list.push({ date: myCar.insurance_expiry, label: 'Страховка', type: 'blue' });
+    // Если есть ТО — добавляем в список
+    if (myCar.tech_inspection_expiry) list.push({ date: myCar.tech_inspection_expiry, label: 'ТО', type: 'amber' });
+    // Если есть Мед — добавляем в список
+    if (myCar.medical_inspection_expiry) list.push({ date: myCar.medical_inspection_expiry, label: 'Мед', type: 'green' });
+    
+    return list;
+  }, [myCar]);
   // Собираем события из дат авто
   const events: CalendarEvent[] = useMemo(() => {
     if (!myCar) return [];
