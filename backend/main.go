@@ -16,30 +16,31 @@ var db *pgxpool.Pool
 
 // --- Модели данных ---
 type Car struct {
-	ID                   string  `json:"id"`
-	Make                 string  `json:"make"`
-	Model                string  `json:"model"`
-	Year                 int     `json:"year"`
-	PlateNumber          string  `json:"plate_number"`
-	Color                *string `json:"color"`
-	VIN                  *string `json:"vin"`
-	Status               string  `json:"status"`
-	AssignedDriverID     *string `json:"assigned_driver_id"`
-	DriverName           *string `json:"driver_name,omitempty"`
-	InsuranceExpiry      *string `json:"insurance_expiry,omitempty"`
-	TechInspectionExpiry *string `json:"tech_inspection_expiry,omitempty"`
-	CreatedAt            string  `json:"created_at"`
+	ID                      string  `json:"id"`
+	Make                    string  `json:"make"`
+	Model                   string  `json:"model"`
+	Year                    int     `json:"year"`
+	PlateNumber             string  `json:"plate_number"`
+	Color                   *string `json:"color"`
+	VIN                     *string `json:"vin"`
+	Status                  string  `json:"status"`
+	AssignedDriverID        *string `json:"assigned_driver_id"`
+	DriverName              *string `json:"driver_name,omitempty"`
+	InsuranceExpiry         *string `json:"insurance_expiry,omitempty"`
+	TechInspectionExpiry    *string `json:"tech_inspection_expiry,omitempty"`
+	MedicalInspectionExpiry *string `json:"medical_inspection_expiry,omitempty"`
+	CreatedAt               string  `json:"created_at"`
 }
 
 type Driver struct {
-	ID             string  `json:"id"`
-	FullName       string  `json:"full_name"`
-	Email          string  `json:"email"`
-	Phone          string  `json:"phone"`
-	Role           string  `json:"role"`
-	IsActive       bool    `json:"is_active"`
-	CreatedAt      string  `json:"created_at"`
-	AssignedCarID  *string `json:"assigned_car_id"`
+	ID            string  `json:"id"`
+	FullName      string  `json:"full_name"`
+	Email         string  `json:"email"`
+	Phone         string  `json:"phone"`
+	Role          string  `json:"role"`
+	IsActive      bool    `json:"is_active"`
+	CreatedAt     string  `json:"created_at"`
+	AssignedCarID *string `json:"assigned_car_id"`
 }
 
 type Log struct {
@@ -85,17 +86,28 @@ func respondError(w http.ResponseWriter, status int, message string) {
 // --- Handlers: Cars ---
 func getCarsHandler(w http.ResponseWriter, r *http.Request) {
 	rows, err := db.Query(r.Context(), `
-		SELECT c.id, c.make, c.model, c.year, c.plate_number, c.color, c.vin, c.status, 
-		       c.assigned_driver_id, c.insurance_expiry, c.tech_inspection_expiry, 
-		       to_char(c.created_at, 'YYYY-MM-DD"T"HH24:MI:SS"Z"') as created_at,
-		       p.full_name as driver_name
+		SELECT 
+			c.id, 
+			c.make, 
+			c.model, 
+			c.year, 
+			c.plate_number, 
+			c.color, 
+			c.vin, 
+			c.status, 
+			c.assigned_driver_id, 
+			to_char(c.insurance_expiry, 'YYYY-MM-DD') as insurance_expiry,
+			to_char(c.tech_inspection_expiry, 'YYYY-MM-DD') as tech_inspection_expiry,
+			to_char(c.medical_inspection_expiry, 'YYYY-MM-DD') as medical_inspection_expiry,
+			to_char(c.created_at, 'YYYY-MM-DD"T"HH24:MI:SS"Z"') as created_at,
+			p.full_name as driver_name
 		FROM cars c 
 		LEFT JOIN users p ON c.assigned_driver_id = p.id
 		ORDER BY c.created_at DESC
 	`)
 	if err != nil {
 		log.Printf("❌ DB query error: %v", err)
-		respondError(w, http.StatusInternalServerError, "DB error")
+		respondError(w, http.StatusInternalServerError, "DB error: "+err.Error())
 		return
 	}
 	defer rows.Close()
@@ -103,18 +115,28 @@ func getCarsHandler(w http.ResponseWriter, r *http.Request) {
 	var cars []Car
 	for rows.Next() {
 		var car Car
-		var color, vin, assignedDriverID, insuranceExpiry, techInspectionExpiry, driverName *string
+		var color, vin, assignedDriverID, insuranceExpiry, techInspectionExpiry, medicalInspectionExpiry, driverName *string
 		var createdAt string
 		
 		err := rows.Scan(
-			&car.ID, &car.Make, &car.Model, &car.Year, &car.PlateNumber,
-			&color, &vin, &car.Status, &assignedDriverID,
-			&insuranceExpiry, &techInspectionExpiry, &createdAt,
+			&car.ID, 
+			&car.Make, 
+			&car.Model, 
+			&car.Year, 
+			&car.PlateNumber,
+			&color, 
+			&vin, 
+			&car.Status, 
+			&assignedDriverID,
+			&insuranceExpiry, 
+			&techInspectionExpiry, 
+			&medicalInspectionExpiry, 
+			&createdAt,
 			&driverName,
 		)
 		if err != nil {
 			log.Printf("❌ Scan error: %v", err)
-			respondError(w, http.StatusInternalServerError, "Scan error")
+			respondError(w, http.StatusInternalServerError, "Scan error: "+err.Error())
 			return
 		}
 		
@@ -123,6 +145,7 @@ func getCarsHandler(w http.ResponseWriter, r *http.Request) {
 		car.AssignedDriverID = assignedDriverID
 		car.InsuranceExpiry = insuranceExpiry
 		car.TechInspectionExpiry = techInspectionExpiry
+		car.MedicalInspectionExpiry = medicalInspectionExpiry
 		car.CreatedAt = createdAt
 		car.DriverName = driverName
 		
@@ -133,12 +156,15 @@ func getCarsHandler(w http.ResponseWriter, r *http.Request) {
 
 func addCarHandler(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Make        string  `json:"make"`
-		Model       string  `json:"model"`
-		Year        int     `json:"year"`
-		PlateNumber string  `json:"plate_number"`
-		Color       *string `json:"color"`
-		VIN         *string `json:"vin"`
+		Make                    string  `json:"make"`
+		Model                   string  `json:"model"`
+		Year                    int     `json:"year"`
+		PlateNumber             string  `json:"plate_number"`
+		Color                   *string `json:"color"`
+		VIN                     *string `json:"vin"`
+		InsuranceExpiry         *string `json:"insurance_expiry"`
+		TechInspectionExpiry    *string `json:"tech_inspection_expiry"`
+		MedicalInspectionExpiry *string `json:"medical_inspection_expiry"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		respondError(w, http.StatusBadRequest, "Invalid JSON")
@@ -146,13 +172,13 @@ func addCarHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	_, err := db.Exec(r.Context(), `
-		INSERT INTO cars (make, model, year, plate_number, color, vin, status, created_at)
-		VALUES ($1, $2, $3, $4, $5, $6, 'active', NOW())
-	`, req.Make, req.Model, req.Year, req.PlateNumber, req.Color, req.VIN)
+		INSERT INTO cars (make, model, year, plate_number, color, vin, status, insurance_expiry, tech_inspection_expiry, medical_inspection_expiry, created_at)
+		VALUES ($1, $2, $3, $4, $5, $6, 'active', $7, $8, $9, NOW())
+	`, req.Make, req.Model, req.Year, req.PlateNumber, req.Color, req.VIN, req.InsuranceExpiry, req.TechInspectionExpiry, req.MedicalInspectionExpiry)
 
 	if err != nil {
 		log.Printf("❌ Insert error: %v", err)
-		respondError(w, http.StatusInternalServerError, "Insert error")
+		respondError(w, http.StatusInternalServerError, "Insert error: "+err.Error())
 		return
 	}
 	respondJSON(w, http.StatusCreated, map[string]string{"status": "created"})
@@ -164,11 +190,26 @@ func assignCarHandler(w http.ResponseWriter, r *http.Request) {
 		DriverID string `json:"driver_id"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		log.Printf("❌ JSON decode error: %v", err)
 		respondError(w, http.StatusBadRequest, "Invalid JSON")
 		return
 	}
 
 	log.Printf("🔗 Assign request: car_id=%s, driver_id=%s", req.CarID, req.DriverID)
+
+	var driverExists bool
+	err := db.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM users WHERE id = $1)`, req.DriverID).Scan(&driverExists)
+	if err != nil {
+		log.Printf("❌ Check driver error: %v", err)
+		respondError(w, http.StatusInternalServerError, "Check error")
+		return
+	}
+
+	if !driverExists {
+		log.Printf("❌ Driver NOT found in DB: %s", req.DriverID)
+		respondError(w, http.StatusNotFound, "Driver not found in database")
+		return
+	}
 
 	result, err := db.Exec(r.Context(), `
 		UPDATE cars SET assigned_driver_id = $1 WHERE id = $2

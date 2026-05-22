@@ -24,8 +24,13 @@ export default function ModeratorDashboard({ onNavigate }: { onNavigate: (page: 
   ];
 
   async function handleSignOut() {
-    await signOut();
-    onNavigate('landing');
+    try {
+      await signOut();
+      onNavigate('landing'); // ✅ Обязательно: редирект на главную
+    } catch (e) {
+      console.error('Logout error:', e);
+      onNavigate('landing'); // ✅ Даже если ошибка — всё равно редиректим
+    }
   }
 
   return (
@@ -74,10 +79,10 @@ export default function ModeratorDashboard({ onNavigate }: { onNavigate: (page: 
           </nav>
         </div>
 
-        <div className="absolute bottom-0 left-0 right-0 p-4 border-t border-gray-100">
+        <div className="p-4 border-t border-gray-100">
           <button
-            onClick={handleSignOut}
-            className="w-fit flex items-center gap-2 px-3 py-2.5 rounded-lg text-sm text-gray-500 hover:text-red-600 hover:bg-red-50 transition-colors"
+            onClick={handleSignOut}  // ✅ Должно быть именно так
+            className="flex items-center gap-2 px-3 py-2.5 rounded-lg text-sm text-gray-500 hover:text-red-600 hover:bg-red-50 transition-colors w-fit"
           >
             <LogOut className="w-4 h-4" /> Выйти
           </button>

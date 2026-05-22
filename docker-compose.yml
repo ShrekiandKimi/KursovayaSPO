@@ -1,0 +1,78 @@
+version: '3.8'
+
+services:
+  # 🐘 PostgreSQL
+  postgres:
+    image: postgres:15-alpine
+    container_name: taxopark_db
+    environment:
+      POSTGRES_DB: taxopark
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres123
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - taxopark_network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # 🔧 pgAdmin (управление БД через браузер)
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: taxopark_pgadmin
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@taxopark.local
+      PGADMIN_DEFAULT_PASSWORD: admin123
+    ports:
+      - "5050:80"
+    depends_on:
+      - postgres
+    networks:
+      - taxopark_network
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+
+  # 🚀 Go Backend
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: taxopark_backend
+    ports:
+      - "8080:8080"
+    environment:
+      DATABASE_URL: postgres://postgres:postgres123@postgres:5432/taxopark?sslmode=disable
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - taxopark_network
+    restart: unless-stopped
+
+  # 🎨 React Frontend
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: taxopark_frontend
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+    networks:
+      - taxopark_network
+    restart: unless-stopped
+
+networks:
+  taxopark_network:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  pgadmin_data:

@@ -24,6 +24,7 @@ export interface Car {
   assigned_driver_id: string | null;
   insurance_expiry: string | null;
   tech_inspection_expiry: string | null;
+  medical_inspection_expiry: string | null;  // ✅ Новое поле для медосмотра
   driver_name?: string | null;
   created_at: string;
 }
@@ -75,6 +76,7 @@ function load<T>(key: string, fallback: T[]): T[] {
 }
 
 export function DataProvider({ children }: { children: ReactNode }) {
+  // Инициализация состояния
   const [drivers, setDrivers] = useState<Driver[]>([]);
   const [logs, setLogs] = useState<Log[]>(() => load(LOGS_KEY, []));
   const [cars, setCars] = useState<Car[]>([]);
@@ -101,13 +103,26 @@ export function DataProvider({ children }: { children: ReactNode }) {
     init();
   }, []);
 
+  // Сохранение логов локально
   useEffect(() => { localStorage.setItem(LOGS_KEY, JSON.stringify(logs)); }, [logs]);
 
+  // --- Функции обновления ---
+
   const refreshCars = async () => {
+    console.log('🔄 Refreshing cars from API...');
     try {
       const updated = await api.cars.getAll();
-      if (updated && !('error' in updated)) setCars(updated);
-    } catch (e) { console.error('Failed to refresh cars', e); }
+      console.log('✅ API response:', updated);
+      
+      if (updated && !('error' in updated)) {
+        console.log(`🚗 Loaded ${updated.length} cars`);
+        setCars(updated);
+      } else {
+        console.error('❌ API returned error:', updated);
+      }
+    } catch (e) {
+      console.error('❌ Failed to refresh cars:', e);
+    }
   };
 
   const refreshDrivers = async () => {
@@ -117,6 +132,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
     } catch (e) { console.error('Failed to refresh drivers', e); }
   };
 
+  // 🚗 Автомобили (через API)
   const addCar = async (car: Omit<Car, 'id' | 'assigned_driver_id' | 'created_at'>) => {
     try {
       await api.cars.add(car);
@@ -159,6 +175,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  // 👤 Водители (локальные действия + обновление из БД)
   const updateDriverStatus = (driverId: string, isActive: boolean) => {
     setDrivers(prev => prev.map(d => d.id === driverId ? { ...d, is_active: isActive } : d));
   };
@@ -167,6 +184,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
     refreshDrivers();
   };
 
+  // 📝 Логи (пока локально)
   const addLog = (log: Omit<Log, 'id' | 'created_at'>) => {
     setLogs(prev => [{ ...log, id: crypto.randomUUID(), created_at: new Date().toISOString() }, ...prev]);
   };
