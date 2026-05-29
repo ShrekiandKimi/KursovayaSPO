@@ -1,4 +1,3 @@
-// Файл: D:/SPOkursach/project/backend/main.go
 package main
 
 import (
@@ -15,7 +14,7 @@ import (
 
 var db *pgxpool.Pool
 
-// --- Модели (с ответами) ---
+// --- Модели ---
 type Car struct {
 	ID                      string  `json:"id"`
 	Make                    string  `json:"make"`
@@ -51,12 +50,21 @@ type Log struct {
 	EndTime     string  `json:"end_time"`
 	Revenue     float64 `json:"revenue"`
 	TripsCount  int     `json:"trips_count"`
+	Kilometers  int     `json:"kilometers"`
 	HadAccident bool    `json:"had_accident"`
 	Notes       string  `json:"notes"`
 	CreatedAt   string  `json:"created_at"`
 }
 
-// --- CORS Middleware ---
+type FinanceStat struct {
+	DriverID     string  `json:"driver_id"`
+	FullName     string  `json:"full_name"`
+	TotalRevenue float64 `json:"total_revenue"`
+	TotalTrips   int     `json:"total_trips"`
+	TotalKm      int     `json:"total_km"`
+}
+
+// --- Middleware ---
 func corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		origin := r.Header.Get("Origin")
@@ -82,6 +90,7 @@ func respondJSON(w http.ResponseWriter, status int, data interface{}) {
 	w.WriteHeader(status)
 	json.NewEncoder(w).Encode(data)
 }
+
 func respondError(w http.ResponseWriter, status int, msg string) {
 	respondJSON(w, status, map[string]string{"error": msg})
 }
@@ -98,12 +107,9 @@ func pingHandler(w http.ResponseWriter, r *http.Request) {
 // --- Handlers: Cars ---
 func getCarsHandler(w http.ResponseWriter, r *http.Request) {
 	rows, err := db.Query(r.Context(), `
-		SELECT id, make, model, year, plate_number, color, vin, status, 
-		       assigned_driver_id, 
-		       to_char(insurance_expiry, 'YYYY-MM-DD'),
-		       to_char(tech_inspection_expiry, 'YYYY-MM-DD'),
-		       to_char(medical_inspection_expiry, 'YYYY-MM-DD'),
-		       to_char(created_at, 'YYYY-MM-DD"T"HH24:MI:SS"Z"')
+		SELECT id, make, model, year, plate_number, color, vin, status, assigned_driver_id, 
+			   to_char(insurance_expiry, 'YYYY-MM-DD'), to_char(tech_inspection_expiry, 'YYYY-MM-DD'), 
+			   to_char(medical_inspection_expiry, 'YYYY-MM-DD'), to_char(created_at, 'YYYY-MM-DD"T"HH24:MI:SS"Z"')
 		FROM cars ORDER BY created_at DESC`)
 	if err != nil {
 		log.Println("❌ DB error:", err)
@@ -126,12 +132,11 @@ func getCarsHandler(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, 200, cars)
 }
 
-// 🔥 ИСПРАВЛЕНО: Добавлены JSON-теги для запроса
 func addCarHandler(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Make                    string  `json:"make"`
 		Model                   string  `json:"model"`
-		PlateNumber             string  `json:"plate_number"`  // ← КЛЮЧЕВОЕ ИСПРАВЛЕНИЕ
+		PlateNumber             string  `json:"plate_number"`
 		Year                    int     `json:"year"`
 		Color                   *string `json:"color"`
 		VIN                     *string `json:"vin"`
@@ -144,9 +149,6 @@ func addCarHandler(w http.ResponseWriter, r *http.Request) {
 		respondError(w, 400, "Invalid JSON: "+err.Error())
 		return
 	}
-	
-	log.Printf("📦 Received car: %+v", req) // 🔍 Лог для отладки
-
 	_, err := db.Exec(r.Context(), `
 		INSERT INTO cars (make, model, year, plate_number, color, vin, status, 
 			insurance_expiry, tech_inspection_expiry, medical_inspection_expiry, created_at)
@@ -224,12 +226,12 @@ func updateCarStatusHandler(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, 200, map[string]string{"status": "updated"})
 }
 
-// --- Handlers: Drivers / Auth ---
+// --- Handlers: Drivers & Auth ---
 func getDriversHandler(w http.ResponseWriter, r *http.Request) {
 	rows, err := db.Query(r.Context(), `
 		SELECT id, full_name, email, phone, role, is_active, 
-		       to_char(created_at, 'YYYY-MM-DD"T"HH24:MI:SS"Z"'),
-		       (SELECT id FROM cars WHERE assigned_driver_id = users.id AND status='active' LIMIT 1)
+			   to_char(created_at, 'YYYY-MM-DD"T"HH24:MI:SS"Z"'),
+			   (SELECT id FROM cars WHERE assigned_driver_id = users.id AND status='active' LIMIT 1)
 		FROM users WHERE role='driver' ORDER BY created_at DESC`)
 	if err != nil {
 		log.Println("❌ DB error:", err)
@@ -248,6 +250,51 @@ func getDriversHandler(w http.ResponseWriter, r *http.Request) {
 		drivers = append(drivers, d)
 	}
 	respondJSON(w, 200, drivers)
+}
+
+func getDriverProfileHandler(w http.ResponseWriter, r *http.Request) {
+	driverID := r.URL.Query().Get("id")
+	if driverID == "" {
+		respondError(w, 400, "Driver ID required")
+		return
+	}
+	var driver Driver
+	err := db.QueryRow(r.Context(), `
+		SELECT id, full_name, email, phone, role, is_active, 
+			   to_char(created_at, 'YYYY-MM-DD"T"HH24:MI:SS"Z"'),
+			   (SELECT id FROM cars WHERE assigned_driver_id = users.id AND status='active' LIMIT 1)
+		FROM users WHERE id = $1 AND role = 'driver'`, driverID).
+		Scan(&driver.ID, &driver.FullName, &driver.Email, &driver.Phone, &driver.Role, &driver.IsActive, &driver.CreatedAt, &driver.AssignedCarID)
+	if err != nil {
+		respondError(w, 404, "Driver not found")
+		return
+	}
+	respondJSON(w, 200, driver)
+}
+
+func updateDriverProfileHandler(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		ID       string `json:"id"`
+		FullName string `json:"full_name"`
+		Phone    string `json:"phone"`
+		Email    string `json:"email"`
+		IsActive bool   `json:"is_active"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		respondError(w, 400, "Invalid JSON")
+		return
+	}
+	_, err := db.Exec(r.Context(), `
+		UPDATE users SET full_name = $1, phone = $2, email = $3, is_active = $4 
+		WHERE id = $5 AND role = 'driver'`,
+		req.FullName, req.Phone, req.Email, req.IsActive, req.ID)
+	if err != nil {
+		log.Println("❌ Update driver error:", err)
+		respondError(w, 500, "Update error: "+err.Error())
+		return
+	}
+	log.Println("✅ Driver profile updated:", req.ID)
+	respondJSON(w, 200, map[string]string{"status": "updated"})
 }
 
 func registerHandler(w http.ResponseWriter, r *http.Request) {
@@ -308,10 +355,10 @@ func loginHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// --- Handlers: Logs ---
+// --- Handlers: Logs (с Kilometers) ---
 func getLogsHandler(w http.ResponseWriter, r *http.Request) {
 	driverID := r.URL.Query().Get("driver_id")
-	query := `SELECT id, driver_id, date, start_time, end_time, revenue, trips_count, had_accident, notes, 
+	query := `SELECT id, driver_id, date, start_time, end_time, revenue, trips_count, kilometers, had_accident, notes, 
 	                 to_char(created_at, 'YYYY-MM-DD"T"HH24:MI:SS"Z"') as created_at FROM logs`
 	args := []interface{}{}
 	if driverID != "" {
@@ -330,7 +377,7 @@ func getLogsHandler(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var l Log
 		rows.Scan(&l.ID, &l.DriverID, &l.Date, &l.StartTime, &l.EndTime,
-			&l.Revenue, &l.TripsCount, &l.HadAccident, &l.Notes, &l.CreatedAt)
+			&l.Revenue, &l.TripsCount, &l.Kilometers, &l.HadAccident, &l.Notes, &l.CreatedAt)
 		logs = append(logs, l)
 	}
 	respondJSON(w, 200, logs)
@@ -344,6 +391,7 @@ func addLogHandler(w http.ResponseWriter, r *http.Request) {
 		EndTime     string  `json:"end_time"`
 		Revenue     float64 `json:"revenue"`
 		TripsCount  int     `json:"trips_count"`
+		Kilometers  int     `json:"kilometers"`
 		HadAccident bool    `json:"had_accident"`
 		Notes       string  `json:"notes"`
 	}
@@ -352,15 +400,47 @@ func addLogHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_, err := db.Exec(r.Context(), `
-		INSERT INTO logs (driver_id, date, start_time, end_time, revenue, trips_count, had_accident, notes, created_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,NOW())`,
-		req.DriverID, req.Date, req.StartTime, req.EndTime, req.Revenue, req.TripsCount, req.HadAccident, req.Notes)
+		INSERT INTO logs (driver_id, date, start_time, end_time, revenue, trips_count, kilometers, had_accident, notes, created_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,NOW())`,
+		req.DriverID, req.Date, req.StartTime, req.EndTime, req.Revenue, req.TripsCount, req.Kilometers, req.HadAccident, req.Notes)
 	if err != nil {
 		log.Println("❌ Insert log error:", err)
 		respondError(w, 500, "Insert error")
 		return
 	}
 	respondJSON(w, 201, map[string]string{"status": "created"})
+}
+
+// --- Handlers: Finance Stats ---
+func getFinanceStatsHandler(w http.ResponseWriter, r *http.Request) {
+	rows, err := db.Query(r.Context(), `
+		SELECT u.id, u.full_name, 
+			   COALESCE(SUM(l.revenue), 0) as total_revenue,
+			   COALESCE(SUM(l.trips_count), 0) as total_trips,
+			   COALESCE(SUM(l.kilometers), 0) as total_km
+		FROM users u
+		LEFT JOIN logs l ON u.id = l.driver_id
+		WHERE u.role = 'driver' AND u.is_active = true
+		GROUP BY u.id, u.full_name
+		ORDER BY total_revenue DESC`)
+	if err != nil {
+		log.Println("❌ DB error:", err)
+		respondError(w, 500, "DB error")
+		return
+	}
+	defer rows.Close()
+	var stats []FinanceStat
+	for rows.Next() {
+		var s FinanceStat
+		err := rows.Scan(&s.DriverID, &s.FullName, &s.TotalRevenue, &s.TotalTrips, &s.TotalKm)
+		if err != nil {
+			log.Println("❌ Scan error:", err)
+			continue
+		}
+		stats = append(stats, s)
+	}
+	// Отдаём массив напрямую, чтобы фронтенд не пытался читать .data
+	respondJSON(w, 200, stats)
 }
 
 // --- Main ---
@@ -384,8 +464,6 @@ func main() {
 
 	mux := http.NewServeMux()
 
-	// === 🔥 РЕГИСТРАЦИЯ МАРШРУТОВ ===
-	// 🚗 Cars
 	mux.HandleFunc("/api/cars", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodGet {
 			getCarsHandler(w, r)
@@ -399,12 +477,32 @@ func main() {
 	mux.HandleFunc("/api/cars/unassign", unassignCarHandler)
 	mux.HandleFunc("/api/cars/status", updateCarStatusHandler)
 
-	// 👥 Drivers / Auth
-	mux.HandleFunc("/api/drivers", getDriversHandler)
+	mux.HandleFunc("/api/drivers", func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			if r.URL.Query().Get("id") != "" {
+				getDriverProfileHandler(w, r)
+			} else {
+				getDriversHandler(w, r)
+			}
+		case http.MethodPut:
+			updateDriverProfileHandler(w, r)
+		default:
+			respondError(w, 405, "Method not allowed")
+		}
+	})
+
+	mux.HandleFunc("/api/finance/stats", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			getFinanceStatsHandler(w, r)
+		} else {
+			respondError(w, 405, "Method not allowed")
+		}
+	})
+
 	mux.HandleFunc("/api/auth/register", registerHandler)
 	mux.HandleFunc("/api/auth/login", loginHandler)
 
-	// 📝 Logs
 	mux.HandleFunc("/api/logs", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodGet {
 			getLogsHandler(w, r)
@@ -415,7 +513,6 @@ func main() {
 		}
 	})
 
-	// ❤️ Health
 	mux.HandleFunc("/api/ping", pingHandler)
 
 	log.Println("🚀 API running on :8080")

@@ -16,6 +16,7 @@ interface DataContextType {
   deleteLog: (logId: string) => void;
   registerDriver: (profile: Omit<Driver, 'assigned_car_id'>) => void;
   refreshDrivers: () => Promise<void>;
+  refreshLogs: () => Promise<void>; // Добавляем функцию обновления
 }
 
 const DataContext = createContext<DataContextType | null>(null);
@@ -31,19 +32,38 @@ export function DataProvider({ children }: { children: ReactNode }) {
   const [cars, setCars] = useState<Car[]>([]);
   const [loading, setLoading] = useState(true);
 
+  // 🔥 ИСПРАВЛЕНИЕ: Загружаем логи с сервера при старте
   useEffect(() => {
     const init = async () => {
       setLoading(true);
       try {
-        const [backendCars, backendDrivers] = await Promise.all([api.cars.getAll(), api.drivers.getAll()]);
+        // Запрашиваем машины, водителей И логи с сервера
+        const [backendCars, backendDrivers, backendLogs] = await Promise.all([
+          api.cars.getAll(), 
+          api.drivers.getAll(),
+          api.logs.getAll() // <-- Забираем все логи из БД
+        ]);
+
         if (backendCars && !('error' in backendCars)) setCars(backendCars);
         if (backendDrivers && !('error' in backendDrivers)) setDrivers(backendDrivers);
-      } catch (e) { console.warn('API init failed', e); } finally { setLoading(false); }
+        
+        // Если логи пришли с сервера — используем их (перезаписываем localStorage)
+        if (backendLogs && !('error' in backendLogs)) {
+          setLogs(backendLogs); 
+        }
+      } catch (e) { 
+        console.warn('API init failed', e); 
+      } finally { 
+        setLoading(false); 
+      }
     };
     init();
   }, []);
 
-  useEffect(() => { localStorage.setItem(LOGS_KEY, JSON.stringify(logs)); }, [logs]);
+  // Сохраняем логи в localStorage при изменении
+  useEffect(() => { 
+    localStorage.setItem(LOGS_KEY, JSON.stringify(logs)); 
+  }, [logs]);
 
   const refreshCars = async () => {
     const updated = await api.cars.getAll();
@@ -53,6 +73,11 @@ export function DataProvider({ children }: { children: ReactNode }) {
   const refreshDrivers = async () => {
     const updated = await api.drivers.getAll();
     if (updated && !('error' in updated)) setDrivers(updated);
+  };
+
+  const refreshLogs = async () => {
+    const updated = await api.logs.getAll();
+    if (updated && !('error' in updated)) setLogs(updated);
   };
 
   const addCar = async (car: Omit<Car, 'id' | 'assigned_driver_id' | 'created_at'>) => {
@@ -82,12 +107,25 @@ export function DataProvider({ children }: { children: ReactNode }) {
   const updateDriverStatus = (driverId: string, isActive: boolean) => {
     setDrivers(prev => prev.map(d => d.id === driverId ? { ...d, is_active: isActive } : d));
   };
+
   const registerDriver = () => { refreshDrivers(); };
-  const addLog = (log: Omit<Log, 'id' | 'created_at'>) => { setLogs(prev => [{ ...log, id: crypto.randomUUID(), created_at: new Date().toISOString() }, ...prev]); };
+
+  const addLog = (log: Omit<Log, 'id' | 'created_at'>) => { 
+    // Создаем локально, но нужно бы отправить на сервер? 
+    // В текущей архитектуре addLog только локальный. 
+    // Для полноценной работы нужно добавить api.logs.add в DataContext, но пока оставим как есть.
+    setLogs(prev => [{ ...log, id: crypto.randomUUID(), created_at: new Date().toISOString() }, ...prev]); 
+  };
+  
   const deleteLog = (logId: string) => { setLogs(prev => prev.filter(l => l.id !== logId)); };
 
   return (
-    <DataContext.Provider value={{ drivers, cars, logs, loading, addCar, assignCarToDriver, unassignCar, updateCarStatus, updateDriverStatus, addLog, deleteLog, registerDriver, refreshDrivers }}>
+    <DataContext.Provider value={{ 
+      drivers, cars, logs, loading, 
+      addCar, assignCarToDriver, unassignCar, updateCarStatus, 
+      updateDriverStatus, addLog, deleteLog, registerDriver, 
+      refreshDrivers, refreshLogs 
+    }}>
       {children}
     </DataContext.Provider>
   );

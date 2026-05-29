@@ -1,20 +1,17 @@
 import { useMemo } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useData } from '../../contexts/DataContext';
-import { Car, Shield, Wrench, Activity, AlertTriangle, CheckCircle } from 'lucide-react';
+import { Car, Shield, Wrench, Activity, CheckCircle } from 'lucide-react';
 
-// ✅ Вспомогательная функция: форматирует "YYYY-MM-DD" → "31 дек. 2026"
 function formatDateRU(dateStr: string | null | undefined): string {
   if (!dateStr) return '—';
   const [year, month, day] = dateStr.split('-');
   if (!year || !month || !day) return dateStr;
-  
   const months = ['янв.', 'фев.', 'мар.', 'апр.', 'мая', 'июн.', 'июл.', 'авг.', 'сен.', 'окт.', 'ноя.', 'дек.'];
   const m = parseInt(month, 10) - 1;
   return `${day} ${months[m] || month} ${year}`;
 }
 
-// ✅ Проверка: просрочено ли (сравниваем строки "YYYY-MM-DD" лексикографически)
 function isExpired(dateStr: string | null | undefined): boolean {
   if (!dateStr) return false;
   const today = new Date();
@@ -23,24 +20,17 @@ function isExpired(dateStr: string | null | undefined): boolean {
 }
 
 export default function DriverCarStatus() {
-  console.log('✅ DriverCarStatus компонент загрузился');
-  console.log(' Cars from context:', cars);
-  console.log('👤 Profile from context:', profile);
+  // 🔥 Сначала ВСЕГДА объявляем хуки
   const { profile } = useAuth();
   const { cars } = useData();
 
+  // 🔥 Только ПОСЛЕ этого используем переменные
   const myCar = useMemo(() => {
-    if (!profile) return null;
+    if (!profile || !cars) return null;
     return cars.find(c => c.assigned_driver_id === profile.id && c.status === 'active') || null;
   }, [profile, cars]);
-    // 🔍 ОТЛАДКА: смотри в Console (F12)
-  if (myCar) {
-    console.log('🔎 DriverCarStatus: myCar dates', {
-      insurance: myCar.insurance_expiry,
-      tech: myCar.tech_inspection_expiry,
-      medical: myCar.medical_inspection_expiry
-    });
-  }
+
+  // 🚫 Автомобиль не назначен
   if (!myCar) {
     return (
       <div className="bg-white rounded-xl border border-gray-200 p-12 text-center">
@@ -77,7 +67,6 @@ export default function DriverCarStatus() {
 
   return (
     <div className="space-y-6">
-      {/* Информация об авто */}
       <div className="bg-white rounded-xl border border-gray-200 p-6">
         <div className="flex items-center gap-4">
           <div className="w-14 h-14 bg-sky-100 rounded-xl flex items-center justify-center flex-shrink-0">
@@ -88,7 +77,7 @@ export default function DriverCarStatus() {
             <p className="text-sm text-gray-500">{myCar.plate_number} · {myCar.color} · {myCar.year}</p>
             {myCar.vin && <p className="text-xs text-gray-400 mt-0.5">VIN: {myCar.vin}</p>}
           </div>
-                  {/* 🔽 Даты документов (безопасный блок) */}
+        </div>
         <div className="mt-4 pt-4 border-t border-gray-100 grid grid-cols-3 gap-3 text-xs">
           {myCar.insurance_expiry && (
             <div className="bg-sky-50 text-sky-700 px-3 py-2 rounded-lg text-center">
@@ -109,15 +98,12 @@ export default function DriverCarStatus() {
             </div>
           )}
         </div>
-        </div>
       </div>
 
-      {/* Статусы документов */}
       <div className="grid gap-4">
         {statusItems.map((item, idx) => {
           const Icon = item.icon;
           const expired = isExpired(item.date);
-          
           return (
             <div key={idx} className={`rounded-xl border p-4 flex items-center justify-between ${expired ? 'border-red-200 bg-red-50/50' : 'border-gray-200 bg-white'}`}>
               <div className="flex items-center gap-3">
@@ -131,7 +117,6 @@ export default function DriverCarStatus() {
                   </div>
                 </div>
               </div>
-              
               <div className="text-right">
                 <div className={`text-sm font-semibold ${expired ? 'text-red-700' : 'text-gray-900'}`}>
                   {formatDateRU(item.date)}
@@ -147,7 +132,6 @@ export default function DriverCarStatus() {
         })}
       </div>
 
-      {/* Подсказка */}
       <div className="bg-sky-50 rounded-xl border border-sky-200 p-4">
         <div className="flex items-start gap-3">
           <CheckCircle className="w-5 h-5 text-sky-600 flex-shrink-0 mt-0.5" />

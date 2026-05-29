@@ -12,13 +12,12 @@ export default function ModStatistics() {
   const filtered = useMemo(() => {
     const now = new Date();
     let startDate: Date | null = null;
-    
     if (period === 'week') {
       startDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
     } else if (period === 'month') {
       startDate = new Date(now.getFullYear(), now.getMonth(), 1);
     }
-    
+
     return logs
       .filter((log: any) => {
         if (!log) return false;
@@ -38,13 +37,13 @@ export default function ModStatistics() {
     const totalTrips = filtered.reduce((s: number, l: any) => s + (l?.trips_count || 0), 0);
     const accidents = filtered.filter((l: any) => l?.had_accident).length;
     const workDays = new Set(filtered.map((l: any) => l?.driver_id + '_' + l?.date)).size;
-    return { 
-      totalRevenue, 
-      totalTrips, 
-      accidents, 
-      workDays, 
-      avgPerDay: workDays ? totalRevenue / workDays : 0, 
-      avgPerTrip: totalTrips ? totalRevenue / totalTrips : 0 
+    return {
+      totalRevenue,
+      totalTrips,
+      accidents,
+      workDays,
+      avgPerDay: workDays ? totalRevenue / workDays : 0,
+      avgPerTrip: totalTrips ? totalRevenue / totalTrips : 0
     };
   }, [filtered]);
 
@@ -60,8 +59,8 @@ export default function ModStatistics() {
     });
     return Object.entries(map).sort((a, b) => {
       const [d1, d2] = [a[0].split('.'), b[0].split('.')];
-      return new Date(2026, Number(d1[1]) - 1, Number(d1[0])).getTime() - 
-             new Date(2026, Number(d2[1]) - 1, Number(d2[0])).getTime();
+      return new Date(2026, Number(d1[1]) - 1, Number(d1[0])).getTime() -
+        new Date(2026, Number(d2[1]) - 1, Number(d2[0])).getTime();
     });
   }, [filtered]);
 
@@ -78,15 +77,19 @@ export default function ModStatistics() {
     return map;
   }, [drivers]);
 
+  // Вспомогательная функция для получения имени или ID
+  const getDriverLabel = (id: string) => {
+    return driverNames.get(id) || `ID: ${id.slice(0, 6)}...`;
+  };
+
   // 📥 Экспорт в Excel
   const exportToExcel = () => {
     if (filtered.length === 0) {
       alert('Нет данных для экспорта');
       return;
     }
-
     const exportData = filtered.map((log: any) => ({
-      'Водитель': driverNames.get(log.driver_id) || 'Неизвестный',
+      'Водитель': getDriverLabel(log.driver_id), // ✅ Исправлено: ID вместо "Неизвестный"
       'Дата': log.date ? new Date(log.date + 'T00:00:00').toLocaleDateString('ru-RU') : '',
       'Поездки': log.trips_count || 0,
       'Выручка (₽)': log.revenue || 0,
@@ -106,19 +109,17 @@ export default function ModStatistics() {
 
     const wb = XLSX.utils.book_new();
     const ws = XLSX.utils.json_to_sheet(exportData);
-    
-    // Настройка ширины колонок
+
     ws['!cols'] = [
-      { wch: 25 }, // Водитель
-      { wch: 12 }, // Дата
-      { wch: 10 }, // Поездки
-      { wch: 15 }, // Выручка
-      { wch: 8 },  // ДТП
-      { wch: 30 }  // Примечание
+      { wch: 20 }, // Водитель (может быть длиннее из-за ID)
+      { wch: 12 },
+      { wch: 10 },
+      { wch: 15 },
+      { wch: 8 },
+      { wch: 30 }
     ];
 
     XLSX.utils.book_append_sheet(wb, ws, 'Статистика');
-    
     const fileName = `taxopark_stats_${period}_${new Date().toISOString().split('T')[0]}.xlsx`;
     XLSX.writeFile(wb, fileName);
   };
@@ -130,20 +131,18 @@ export default function ModStatistics() {
         <div className="flex flex-wrap gap-3 items-center">
           <div className="flex bg-gray-100 rounded-lg p-1">
             {(['week', 'month', 'all'] as const).map(p => (
-              <button 
-                key={p} 
-                onClick={() => setPeriod(p)} 
-                className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
-                  period === p ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'
-                }`}
+              <button
+                key={p}
+                onClick={() => setPeriod(p)}
+                className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${period === p ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
               >
                 {p === 'week' ? 'Неделя' : p === 'month' ? 'Месяц' : 'Всё время'}
               </button>
             ))}
           </div>
-          <select 
-            value={selectedDriver} 
-            onChange={e => setSelectedDriver(e.target.value)} 
+          <select
+            value={selectedDriver}
+            onChange={e => setSelectedDriver(e.target.value)}
             className="px-3 py-1.5 border border-gray-300 rounded-lg text-sm text-gray-700 focus:ring-2 focus:ring-sky-500 outline-none"
           >
             <option value="all">Все водители</option>
@@ -152,8 +151,7 @@ export default function ModStatistics() {
             ))}
           </select>
         </div>
-
-        <button 
+        <button
           onClick={exportToExcel}
           disabled={filtered.length === 0}
           className="flex items-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white text-sm font-medium rounded-lg transition-colors"
@@ -184,9 +182,9 @@ export default function ModStatistics() {
             {dailyData.map(([day, data]) => (
               <div key={day} className="flex-1 flex flex-col items-center gap-1">
                 <div className="text-[10px] text-gray-500">{data.revenue.toFixed(0)}₽</div>
-                <div 
-                  className="w-full bg-sky-500 rounded-t-sm min-h-[4px] transition-all hover:bg-sky-400" 
-                  style={{ height: `${(data.revenue / maxDaily) * 100}%` }} 
+                <div
+                  className="w-full bg-sky-500 rounded-t-sm min-h-[4px] transition-all hover:bg-sky-400"
+                  style={{ height: `${(data.revenue / maxDaily) * 100}%` }}
                 />
                 <div className="text-[10px] text-gray-400">{day}</div>
               </div>
@@ -214,11 +212,18 @@ export default function ModStatistics() {
             <tbody className="divide-y divide-gray-100">
               {filtered.map((log: any) => (
                 <tr key={log?.id || Math.random()} className="hover:bg-gray-50">
-                  <td className="px-4 py-3 font-medium">{driverNames.get(log?.driver_id) || 'Неизвестно'}</td>
+                  <td className="px-4 py-3 font-medium">
+                    {/* ✅ Исправлено: Используем ID, если имя не найдено */}
+                    {getDriverLabel(log?.driver_id)}
+                  </td>
                   <td className="px-4 py-3">{log?.date ? new Date(log.date + 'T00:00:00').toLocaleDateString('ru-RU') : '—'}</td>
                   <td className="px-4 py-3">{log?.trips_count || 0}</td>
                   <td className="px-4 py-3 font-semibold">{(log?.revenue || 0).toLocaleString('ru-RU')} ₽</td>
-                  <td className="px-4 py-3">{log?.had_accident ? <span className="text-xs text-red-600 font-medium">ДТП</span> : <span className="text-xs text-green-600">Ок</span>}</td>
+                  <td className="px-4 py-3">
+                    {log?.had_accident ?
+                      <span className="text-xs text-red-600 font-medium">ДТП</span> :
+                      <span className="text-xs text-green-600">Ок</span>}
+                  </td>
                 </tr>
               ))}
             </tbody>
