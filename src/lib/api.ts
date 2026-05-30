@@ -118,7 +118,15 @@ export const api = {
   // 👥 Водители
   drivers: {
     getAll: (): Promise<Driver[] | ApiError> => request<Driver[]>('/drivers'),
+    
+    // 🔥 НОВОЕ: Обновление профиля водителя
+    update: (id: string, data: { full_name: string; phone: string; email: string; is_active: boolean }): Promise<{ status: string } | ApiError> => 
+      request('/drivers', {
+        method: 'PUT',
+        body: JSON.stringify({ id, ...data }),
+      }),
   },
+
 
   // 📝 Логи (смены, доходы)
   logs: {
